@@ -1,3 +1,4 @@
+print('0707')
 from dataclasses import dataclass, field
 from typing import Any
 
