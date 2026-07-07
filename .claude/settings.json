@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Bash(npm:*)",
+      "Bash(git:*)",
+      "Bash(node:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)"
+    ]
+  },
+  "env": {
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "80"
+  }
+}
