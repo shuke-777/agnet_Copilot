@@ -6,6 +6,7 @@ from typing import Any
 from models.agent_trace import AgentStep
 from models.business import Logistics, Order
 from schemas.copilot import CopilotAnalyzeRequest
+from schemas.policy import PolicySource
 
 
 @dataclass
@@ -18,6 +19,7 @@ class CopilotState:
     order: Order | None = None
     logistics: Logistics | None = None
     is_abnormal: bool | None = None
+    retrieved_policies: list[PolicySource] = field(default_factory=list)
     reply_draft: str | None = None
     ticket_id: str | None = None
     steps: list[AgentStep] = field(default_factory=list)

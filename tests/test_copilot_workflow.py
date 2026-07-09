@@ -16,7 +16,6 @@ from agents.workflow import build_copilot_graph, run_copilot_workflow
 class TestCopilotWorkflow(unittest.TestCase):
     def test_workflow_builds_langgraph_app(self) -> None:
         graph = build_copilot_graph()
-
         self.assertTrue(hasattr(graph, "invoke"))
 
     def test_workflow_executes_nodes_and_returns_state(self) -> None:
@@ -40,6 +39,7 @@ class TestCopilotWorkflow(unittest.TestCase):
             self.assertEqual(state.order_id, "ORD-1001")
             self.assertTrue(state.is_abnormal)
             self.assertIsNotNone(state.ticket_id)
+            self.assertGreaterEqual(len(state.retrieved_policies), 1)
             self.assertIn("物流超过 72 小时未更新", state.reply_draft)
 
             step_names = [step.step_name for step in state.steps]
@@ -51,6 +51,7 @@ class TestCopilotWorkflow(unittest.TestCase):
                     "order_query",
                     "logistics_query",
                     "abnormal_check",
+                    "policy_retrieval",
                     "reply_generate",
                     "ticket_create",
                 ],
@@ -78,4 +79,5 @@ class TestCopilotWorkflow(unittest.TestCase):
             self.assertEqual(state.order_id, "ORD-1001")
             self.assertTrue(state.is_abnormal)
             self.assertIsNotNone(state.ticket_id)
+            self.assertGreaterEqual(len(state.retrieved_policies), 1)
             self.assertEqual(state.steps[-1].step_name, "ticket_create")

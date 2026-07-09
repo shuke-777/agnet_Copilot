@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 
+from schemas.policy import PolicySource
+
 
 class CopilotAnalyzeRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=64)
@@ -15,3 +17,4 @@ class CopilotAnalyzeResponse(BaseModel):
     reply_draft: str
     ticket_created: bool
     ticket_id: str | None
+    policy_sources: list[PolicySource] = Field(default_factory=list)

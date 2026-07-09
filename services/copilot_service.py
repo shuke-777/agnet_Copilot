@@ -30,6 +30,7 @@ def analyze_after_sales_issue(
             reply_draft=state.reply_draft or "",
             ticket_created=state.ticket_id is not None,
             ticket_id=state.ticket_id,
+            policy_sources=state.retrieved_policies,
         )
     except HTTPException:
         finish_agent_run(db, run_id=run.run_id, status="failed")

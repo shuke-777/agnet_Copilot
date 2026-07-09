@@ -1,4 +1,7 @@
 fastapi
+faiss-cpu
+langchain
+langchain-community
 langgraph
 pydantic
 pytest

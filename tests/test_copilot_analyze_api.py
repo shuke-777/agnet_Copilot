@@ -32,7 +32,10 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
         self.assertTrue(body["is_abnormal"])
         self.assertTrue(body["ticket_created"])
         self.assertIsNotNone(body["ticket_id"])
+        self.assertGreaterEqual(len(body["policy_sources"]), 1)
+        self.assertEqual(body["policy_sources"][0]["source_id"], "logistics_delay_72h_sop")
         self.assertIn("物流超过 72 小时未更新", body["reply_draft"])
+        self.assertIn("处理 SOP", body["reply_draft"])
 
         ticket_response = self.client.get(f"/api/tickets/{body['ticket_id']}")
         self.assertEqual(ticket_response.status_code, 200)
@@ -52,6 +55,7 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
                 "order_query",
                 "logistics_query",
                 "abnormal_check",
+                "policy_retrieval",
                 "reply_generate",
                 "ticket_create",
             ],
@@ -73,6 +77,8 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
         self.assertFalse(body["is_abnormal"])
         self.assertFalse(body["ticket_created"])
         self.assertIsNone(body["ticket_id"])
+        source_ids = {source["source_id"] for source in body["policy_sources"]}
+        self.assertIn("normal_logistics_reply_script", source_ids)
         self.assertIn("物流状态正常", body["reply_draft"])
 
         steps_response = self.client.get(f"/api/runs/{body['run_id']}/steps")
