@@ -3,8 +3,8 @@
 ## 项目状态
 
 - 项目定位：电商售后客服 Copilot
-- 当前阶段：M2 物流异常 Copilot 闭环增强
-- 当前里程碑：LangGraph + RAG 知识库检索节点
+- 当前阶段：M4 飞书 Webhook V1 通知
+- 当前里程碑：异常物流工单飞书通知
 
 ## 已完成
 
@@ -45,6 +45,11 @@
   - LangChain + FAISS 检索
   - deterministic embedding，暂不依赖外部 LLM 或付费 embedding API
   - `policy_retrieval` step 写入 Agent 执行链路
+- 飞书 Webhook V1 通知已接入：
+  - 未配置 `FEISHU_WEBHOOK_URL` 时默认跳过真实发送
+  - 异常物流工单创建后记录 `feishu_notify` step
+  - 飞书通知失败不影响 Copilot 主流程返回
+  - `POST /api/copilot/analyze` 返回 `feishu_status`
 - 自动化测试已覆盖：
   - 健康检查
   - 订单 / 物流 / 工单 API
@@ -52,11 +57,12 @@
   - Copilot analyze API
   - LangGraph workflow
   - RAG policy retrieval
+  - 飞书 Webhook disabled / failed / trace 记录
 
 ## 下一步
 
-- 接入飞书 Webhook V1，先实现异常物流工单通知
-- 或先做最小客服后台页面，用于展示订单、物流、工单、Agent run 和 step
+- 做最小客服后台页面，用于展示订单、物流、工单、Agent run 和 step
+- 或继续增强飞书 M5：交互卡片按钮回调、状态流转和 `feishu_events`
 
 ## 备注
 

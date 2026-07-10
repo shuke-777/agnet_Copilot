@@ -38,6 +38,29 @@ curl -s http://127.0.0.1:8000/api/logistics/ORD-1001
 
 `ORD-1001` 是物流异常样例，适合测试催物流工单；`ORD-1002` 是物流正常样例，适合后续对比。
 
+## Copilot + 飞书通知测试
+
+默认不配置真实飞书 Webhook，此时异常物流工单会创建成功，飞书通知状态返回 `disabled`，并记录一条 `feishu_notify` step：
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/api/copilot/analyze \
+  -H 'Content-Type: application/json' \
+  -d '{"session_id":"SESSION-FEISHU-001","user_id":"USER-001","user_message":"我的订单 ORD-1001 怎么还没收到？帮我催一下物流。"}'
+```
+
+如果需要测试真实飞书群通知，启动服务前配置：
+
+```bash
+export FEISHU_WEBHOOK_URL='你的飞书机器人 Webhook 地址'
+/opt/anaconda3/envs/rag_910/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
+```
+
+接口返回的 `run_id` 可以继续查询执行步骤：
+
+```bash
+curl -s http://127.0.0.1:8000/api/runs/{run_id}/steps
+```
+
 创建工单：
 
 ```bash

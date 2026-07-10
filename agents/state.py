@@ -22,4 +22,5 @@ class CopilotState:
     retrieved_policies: list[PolicySource] = field(default_factory=list)
     reply_draft: str | None = None
     ticket_id: str | None = None
+    feishu_status: str = "skipped"
     steps: list[AgentStep] = field(default_factory=list)

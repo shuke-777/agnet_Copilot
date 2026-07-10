@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -25,7 +26,7 @@ class TestCopilotWorkflow(unittest.TestCase):
             user_message="我的订单 ORD-1001 怎么还没收到？",
         )
 
-        with SessionLocal() as db:
+        with patch.dict("os.environ", {"FEISHU_WEBHOOK_URL": ""}), SessionLocal() as db:
             run = start_agent_run(
                 db,
                 session_id=payload.session_id,
@@ -39,6 +40,7 @@ class TestCopilotWorkflow(unittest.TestCase):
             self.assertEqual(state.order_id, "ORD-1001")
             self.assertTrue(state.is_abnormal)
             self.assertIsNotNone(state.ticket_id)
+            self.assertEqual(state.feishu_status, "disabled")
             self.assertGreaterEqual(len(state.retrieved_policies), 1)
             self.assertIn("物流超过 72 小时未更新", state.reply_draft)
 
@@ -54,6 +56,7 @@ class TestCopilotWorkflow(unittest.TestCase):
                     "policy_retrieval",
                     "reply_generate",
                     "ticket_create",
+                    "feishu_notify",
                 ],
             )
 
@@ -64,7 +67,7 @@ class TestCopilotWorkflow(unittest.TestCase):
             user_message="我的订单 ORD-1001 怎么还没收到？",
         )
 
-        with SessionLocal() as db:
+        with patch.dict("os.environ", {"FEISHU_WEBHOOK_URL": ""}), SessionLocal() as db:
             run = start_agent_run(
                 db,
                 session_id=payload.session_id,
@@ -79,5 +82,6 @@ class TestCopilotWorkflow(unittest.TestCase):
             self.assertEqual(state.order_id, "ORD-1001")
             self.assertTrue(state.is_abnormal)
             self.assertIsNotNone(state.ticket_id)
+            self.assertEqual(state.feishu_status, "disabled")
             self.assertGreaterEqual(len(state.retrieved_policies), 1)
-            self.assertEqual(state.steps[-1].step_name, "ticket_create")
+            self.assertEqual(state.steps[-1].step_name, "feishu_notify")
