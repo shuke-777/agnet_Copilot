@@ -1,9 +1,19 @@
+import sys
+from pathlib import Path
+
+import uvicorn
 from fastapi import FastAPI
 
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+print(PROJECT_ROOT)
 from api.agent_trace import router as agent_trace_router
 from api.admin import router as admin_router
 from api.business import router as business_router
 from api.copilot import router as copilot_router
+from api.feishu import router as feishu_router
 from services.bootstrap import bootstrap_database
 
 
@@ -23,6 +33,7 @@ app.include_router(agent_trace_router)
 app.include_router(admin_router)
 app.include_router(business_router)
 app.include_router(copilot_router)
+app.include_router(feishu_router)
 
 
 @app.get("/health")
@@ -32,3 +43,11 @@ def health_check() -> dict[str, str]:
         "service": APP_NAME,
         "version": APP_VERSION,
     }
+
+
+def run_dev_server() -> None:
+    uvicorn.run(app, host="127.0.0.1", port=8001)
+
+
+if __name__ == "__main__":
+    run_dev_server()
