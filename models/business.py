@@ -69,11 +69,6 @@ class Ticket(Base):
         cascade="all, delete-orphan",
         order_by="TicketEvent.created_at",
     )
-    feishu_events: Mapped[list["FeishuEvent"]] = relationship(
-        back_populates="ticket",
-        cascade="all, delete-orphan",
-        order_by="FeishuEvent.created_at",
-    )
 
 
 class TicketEvent(Base):

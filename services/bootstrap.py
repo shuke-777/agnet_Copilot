@@ -5,11 +5,9 @@ from sqlalchemy.orm import Session
 from models.agent_trace import AgentRun, AgentStep
 from models.business import Logistics, Order
 from models.database import Base, engine
-from models.feishu_event import FeishuEvent
 
 
 _TRACE_MODELS = (AgentRun, AgentStep)
-_FEISHU_MODELS = (FeishuEvent,)
 
 
 def init_database() -> None:

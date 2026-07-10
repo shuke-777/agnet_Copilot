@@ -68,24 +68,6 @@ curl -s http://127.0.0.1:8000/api/runs/{run_id}/steps
 - Agent run 列表：`http://127.0.0.1:8000/admin/runs`
 - Agent run 详情：`http://127.0.0.1:8000/admin/runs/{run_id}`
 
-## 飞书按钮回调测试
-
-先创建一个异常物流工单，记下返回的 `ticket_id`，再模拟飞书卡片的“接单”按钮：
-
-```bash
-curl -s -X POST http://127.0.0.1:8000/api/feishu/callback \
-  -H 'Content-Type: application/json' \
-  -d '{"event_id":"FEISHU-EVENT-001","ticket_id":"{ticket_id}","action":"claim","operator":"客服A"}'
-```
-
-支持的动作：
-
-- `claim`：`todo -> processing`
-- `resolve`：`processing -> resolved`
-- `reopen`：`resolved -> processing`
-
-每次成功回调都会更新工单，并写入 `ticket_events` 和 `feishu_events`。
-
 创建工单：
 
 ```bash
@@ -96,4 +78,4 @@ curl -s -X POST http://127.0.0.1:8000/api/tickets \
 
 ## 后续
 
-后续会按里程碑继续补齐后台操作表单、性能看板和展示材料。
+后续会按里程碑继续补齐飞书交互卡片回调、后台操作表单、性能看板和展示材料。

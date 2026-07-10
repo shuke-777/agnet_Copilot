@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -90,31 +89,3 @@ class TicketRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     events: list[TicketEventRead] = []
-
-
-class FeishuCallbackRequest(BaseModel):
-    event_id: str = Field(min_length=1, max_length=128)
-    ticket_id: str = Field(min_length=1, max_length=64)
-    action: Literal["claim", "resolve", "reopen"]
-    operator: str = Field(min_length=1, max_length=64)
-
-
-class FeishuEventRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    event_id: str
-    ticket_id: str
-    action: str
-    operator: str
-    from_status: str
-    to_status: str
-    status: str
-    payload: str | None
-    created_at: datetime
-    processed_at: datetime
-
-
-class FeishuCallbackResponse(BaseModel):
-    ticket: TicketRead
-    ticket_event: TicketEventRead
-    feishu_event: FeishuEventRead

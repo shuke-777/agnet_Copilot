@@ -3,8 +3,8 @@
 ## 项目状态
 
 - 项目定位：电商售后客服 Copilot
-- 当前阶段：M5 飞书交互卡片回调
-- 当前里程碑：飞书回调驱动工单状态流转
+- 当前阶段：M3 最小客服后台页面
+- 当前里程碑：工单、订单物流、Agent run/step 可视化展示
 
 ## 已完成
 
@@ -55,15 +55,6 @@
   - `GET /admin/tickets/{ticket_id}` 展示工单详情、订单物流信息和工单事件时间线
   - `GET /admin/runs` 展示 Agent run 列表
   - `GET /admin/runs/{run_id}` 展示 Agent run 详情和 step 执行链路
-- 测试数据库已隔离：
-  - pytest 使用 `data/test.db`
-  - 本地服务继续使用 `data/app.db`
-- M5 飞书交互回调已接入：
-  - 新增 `feishu_events` 表，记录回调动作和处理结果
-  - `POST /api/feishu/callback` 支持 `claim`、`resolve`、`reopen`
-  - 回调成功后同步更新 `tickets.status`
-  - 同时记录 `ticket_events` 和 `feishu_events`
-  - 非法状态流转返回 HTTP 409
 - 自动化测试已覆盖：
   - 健康检查
   - 订单 / 物流 / 工单 API
@@ -72,14 +63,12 @@
   - LangGraph workflow
   - RAG policy retrieval
   - 飞书 Webhook disabled / failed / trace 记录
-  - 飞书按钮回调、状态流转和事件记录
   - 最小客服后台页面
 
 ## 下一步
 
-- 增强后台页面：增加工单状态操作表单和筛选
-- 增加 dashboard 指标：工单状态分布、Agent run 耗时、飞书通知成功率
-- M7 集中完善 README、架构图、运行截图和项目展示材料
+- 优先做 M5 飞书交互卡片按钮回调、状态流转和 `feishu_events`
+- 或继续增强后台页面：增加工单状态操作表单、筛选、dashboard 指标
 
 ## 备注
 
