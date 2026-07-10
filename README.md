@@ -20,6 +20,7 @@
 
 - 健康检查：`http://127.0.0.1:8000/health`
 - Swagger：`http://127.0.0.1:8000/docs`
+- 最小客服后台：`http://127.0.0.1:8000/admin/tickets`
 
 ## 本地测试
 
@@ -61,6 +62,12 @@ export FEISHU_WEBHOOK_URL='你的飞书机器人 Webhook 地址'
 curl -s http://127.0.0.1:8000/api/runs/{run_id}/steps
 ```
 
+也可以在浏览器中查看后台页面：
+
+- 工单列表：`http://127.0.0.1:8000/admin/tickets`
+- Agent run 列表：`http://127.0.0.1:8000/admin/runs`
+- Agent run 详情：`http://127.0.0.1:8000/admin/runs/{run_id}`
+
 创建工单：
 
 ```bash
@@ -71,4 +78,4 @@ curl -s -X POST http://127.0.0.1:8000/api/tickets \
 
 ## 后续
 
-后续会按里程碑逐步补齐 Agent 埋点、Copilot 分析闭环、飞书和后台页面。
+后续会按里程碑继续补齐飞书交互卡片回调、后台操作表单、性能看板和展示材料。

@@ -3,8 +3,8 @@
 ## 项目状态
 
 - 项目定位：电商售后客服 Copilot
-- 当前阶段：M4 飞书 Webhook V1 通知
-- 当前里程碑：异常物流工单飞书通知
+- 当前阶段：M3 最小客服后台页面
+- 当前里程碑：工单、订单物流、Agent run/step 可视化展示
 
 ## 已完成
 
@@ -50,6 +50,11 @@
   - 异常物流工单创建后记录 `feishu_notify` step
   - 飞书通知失败不影响 Copilot 主流程返回
   - `POST /api/copilot/analyze` 返回 `feishu_status`
+- M3 最小客服后台页面已接入：
+  - `GET /admin/tickets` 展示工单列表、订单号、商品、优先级、状态和摘要
+  - `GET /admin/tickets/{ticket_id}` 展示工单详情、订单物流信息和工单事件时间线
+  - `GET /admin/runs` 展示 Agent run 列表
+  - `GET /admin/runs/{run_id}` 展示 Agent run 详情和 step 执行链路
 - 自动化测试已覆盖：
   - 健康检查
   - 订单 / 物流 / 工单 API
@@ -58,11 +63,12 @@
   - LangGraph workflow
   - RAG policy retrieval
   - 飞书 Webhook disabled / failed / trace 记录
+  - 最小客服后台页面
 
 ## 下一步
 
-- 做最小客服后台页面，用于展示订单、物流、工单、Agent run 和 step
-- 或继续增强飞书 M5：交互卡片按钮回调、状态流转和 `feishu_events`
+- 优先做 M5 飞书交互卡片按钮回调、状态流转和 `feishu_events`
+- 或继续增强后台页面：增加工单状态操作表单、筛选、dashboard 指标
 
 ## 备注
 
