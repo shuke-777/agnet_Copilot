@@ -474,6 +474,71 @@ dashboard 指标
 GitHub 展示文档
 ```
 
+### M8：独立前端工作台
+
+```text
+技术栈：Vite + React + TypeScript + Ant Design + React Router + Axios + Recharts
+前后端分离：frontend/ 独立工程，通过 REST API 调用 FastAPI
+默认首页：Copilot 工作台，输入客服问题并展示分析、回复草稿、RAG 引用、工单和 Agent Run
+工单中心：工单列表、状态/优先级筛选、工单详情、事件时间线、人工状态流转
+Agent 追踪：Run 列表、Run 详情和 Step 执行链路
+运营看板：对接现有 Dashboard API，展示工单分布和 Agent 性能
+后端补充：GET /api/runs 和 POST /api/tickets/{ticket_id}/actions/{action}
+保留 /admin/* 作为内部调试后台，React 前端作为正式业务界面
+Docker Compose 同时启动前后端服务
+```
+
+视觉方向：
+
+```text
+工作台参考 Intercom Inbox：输入、分析结果和业务上下文并列呈现
+工单中心参考 Linear：高信息密度、状态与优先级清晰
+Agent 追踪参考 LangSmith / Datadog：Step 时间线、耗时、输入输出与错误可见
+统一使用深色侧边导航、浅灰工作区、白色内容面；蓝绿色表示主操作，红橙色仅用于异常和高优先级
+```
+
+### M9：真实 LLM Gateway
+
+```text
+新增统一 LLM Gateway，业务节点不直接依赖具体模型供应商
+支持 openai_compatible、ollama、disabled 三种模式，通过环境变量配置 provider、base_url、api_key 和 model
+真实模型优先承担意图识别、订单号提取、RAG 查询改写和客服回复草稿生成
+订单/物流查询、异常判断、建单、状态流转和飞书通知继续由确定性业务代码执行
+Pydantic 校验模型结构化输出；超时、有限重试或输出不合格时降级为 deterministic 逻辑
+记录模型名称、耗时、token 用量和失败原因到 Agent step，支持后续成本与性能分析
+密钥仅从环境变量读取，不写入代码、数据库或 Git
+```
+
+### M10：Redis 缓存、限流与运营风险榜
+
+```text
+使用 Redis 实现 POST /api/copilot/analyze 的令牌桶限流，优先按 user_id 限制，并以 IP 作为兜底
+超限返回 HTTP 429 和可重试时间，保护真实 LLM 调用成本
+缓存 Dashboard 统计结果 30-60 秒；建单、工单状态更新和飞书回调后主动失效
+使用 Redis Sorted Set 维护运营风险榜：异常物流承运商风险榜、待处理高优先级工单榜和高频售后问题榜
+使用幂等键或短期锁，防止请求重试导致重复建单、重复飞书通知或重复处理回调
+后续多轮 Copilot 可使用 Redis 按 session_id 保存短期会话上下文
+```
+
+### M11：RabbitMQ 异步任务与可靠投递
+
+```text
+RabbitMQ 专门处理可靠异步任务，不与 Redis 的缓存、限流和排行榜职责重叠
+异步处理飞书通知重试、长耗时 LLM 重试、外部平台同步和失败工单告警
+定义任务消息、消费状态、有限重试、退避策略和死信队列
+消费成功后更新 ticket_events 或 agent_steps，消费失败保留可追踪的错误信息
+任务按 run_id、ticket_id 或 event_id 实现幂等，避免重复通知和重复业务动作
+监控队列积压、消费耗时、重试次数和死信数量
+```
+
+### M12：实时事件推送（可选）
+
+```text
+使用 WebSocket 或 SSE 将 Copilot 执行进度、工单状态变化和异步任务结果推送到前端
+前端工作台展示 Agent Step 实时状态，工单详情无需手动刷新即可看到飞书回调和异步任务结果
+Redis Pub/Sub 可作为多实例事件分发能力；RabbitMQ 仍负责可靠任务投递
+```
+
 ## 项目亮点
 
 这个项目的竞争点不是“用了 Agent”，而是：

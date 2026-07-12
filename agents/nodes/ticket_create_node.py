@@ -7,7 +7,7 @@ from services.trace_service import record_agent_step
 
 
 def ticket_create_node(db: Session, state: CopilotState) -> CopilotState:
-    if not state.is_abnormal:
+    if state.intent != "logistics_delay" or not state.is_abnormal:
         return state
 
     ticket = Ticket(

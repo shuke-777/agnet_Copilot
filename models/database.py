@@ -1,4 +1,5 @@
 from collections.abc import Generator
+import os
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -7,7 +8,7 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data"
-DATABASE_URL = f"sqlite:///{DATA_DIR / 'app.db'}"
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DATA_DIR / 'app.db'}")
 
 
 class Base(DeclarativeBase):

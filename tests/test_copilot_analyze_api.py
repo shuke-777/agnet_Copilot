@@ -58,7 +58,9 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
                 "order_query",
                 "logistics_query",
                 "abnormal_check",
+                "query_rewrite",
                 "policy_retrieval",
+                "policy_rerank",
                 "reply_generate",
                 "ticket_create",
                 "feishu_notify",
@@ -95,6 +97,31 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
         step_names = [step["step_name"] for step in steps_response.json()]
         self.assertNotIn("ticket_create", step_names)
         self.assertIn("feishu_notify", step_names)
+
+    def test_analyze_uses_refund_policy_without_creating_logistics_ticket(self) -> None:
+        response = self.client.post(
+            "/api/copilot/analyze",
+            json={
+                "session_id": "SESSION-COPILOT-REFUND-001",
+                "user_id": "USER-001",
+                "user_message": "订单 ORD-1001 可以退款吗？",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["intent"], "refund")
+        self.assertFalse(body["ticket_created"])
+        self.assertIsNone(body["ticket_id"])
+        self.assertIn("退款咨询", body["reply_draft"])
+        self.assertEqual(body["policy_sources"][0]["source_id"], "refund_processing_rule")
+
+        steps_response = self.client.get(f"/api/runs/{body['run_id']}/steps")
+        self.assertEqual(steps_response.status_code, 200)
+        step_names = [step["step_name"] for step in steps_response.json()]
+        self.assertIn("query_rewrite", step_names)
+        self.assertIn("policy_rerank", step_names)
+        self.assertNotIn("ticket_create", step_names)
 
     def test_analyze_returns_200_when_feishu_webhook_fails(self) -> None:
         with patch.dict("os.environ", {"FEISHU_WEBHOOK_URL": "https://example.invalid/webhook"}):

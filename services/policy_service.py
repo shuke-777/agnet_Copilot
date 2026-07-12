@@ -2,6 +2,7 @@ import math
 from functools import lru_cache
 
 from langchain_community.vectorstores import FAISS
+from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
 from memory.policy_knowledge import POLICY_DOCUMENTS
@@ -25,7 +26,30 @@ KEYWORD_VOCABULARY = (
     "话术",
     "安抚",
     "回复",
+    "发货",
+    "时效",
+    "未发货",
+    "退款",
+    "退钱",
+    "仅退款",
+    "原路退款",
+    "退货",
+    "换货",
+    "寄回",
+    "运费",
+    "邮费",
+    "运费险",
+    "承担",
 )
+
+
+INTENT_POLICY_CONTEXT = {
+    "logistics_delay": "物流异常与催物流",
+    "shipping_timeliness": "发货时效与未发货",
+    "refund": "退款处理",
+    "return": "退货申请",
+    "freight": "运费承担",
+}
 
 
 class DeterministicPolicyEmbedding(Embeddings):
@@ -59,20 +83,37 @@ def lexical_relevance(query: str, content: str) -> float:
     return matched / query_terms
 
 
-def retrieve_after_sales_policies(
+def rewrite_after_sales_query(
+    user_message: str,
+    *,
+    intent: str | None,
+    is_abnormal: bool | None,
+) -> str:
+    context = INTENT_POLICY_CONTEXT.get(intent or "", "售后咨询")
+    logistics_context = "物流异常" if is_abnormal else "物流正常"
+    return f"{user_message} 售后意图：{context}。{logistics_context}。请检索售后规则与客服话术。"
+
+
+def retrieve_policy_candidates(query: str) -> list[Document]:
+    vector_store = get_policy_vector_store()
+    return vector_store.similarity_search(query, k=len(POLICY_DOCUMENTS))
+
+
+def rerank_after_sales_policies(
     *,
     query: str,
+    candidates: list[Document],
+    intent: str | None,
     is_abnormal: bool | None,
     limit: int = 2,
     score_threshold: float = 0.05,
 ) -> list[PolicySource]:
-    vector_store = get_policy_vector_store()
-    candidates = vector_store.similarity_search(query, k=len(POLICY_DOCUMENTS))
-
     ranked: list[PolicySource] = []
     for document in candidates:
         scenario = document.metadata.get("scenario")
         relevance = lexical_relevance(query, document.page_content)
+        if intent and scenario == intent:
+            relevance += 1.0
         if is_abnormal is True and scenario == "abnormal_logistics":
             relevance += 0.3
         elif is_abnormal is False and scenario == "normal_logistics":
@@ -94,3 +135,21 @@ def retrieve_after_sales_policies(
 
     ranked.sort(key=lambda policy: policy.score, reverse=True)
     return ranked[:limit]
+
+
+def retrieve_after_sales_policies(
+    *,
+    query: str,
+    is_abnormal: bool | None,
+    intent: str | None = None,
+    limit: int = 2,
+    score_threshold: float = 0.05,
+) -> list[PolicySource]:
+    return rerank_after_sales_policies(
+        query=query,
+        candidates=retrieve_policy_candidates(query),
+        intent=intent,
+        is_abnormal=is_abnormal,
+        limit=limit,
+        score_threshold=score_threshold,
+    )

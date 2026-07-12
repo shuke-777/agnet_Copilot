@@ -46,4 +46,49 @@ POLICY_DOCUMENTS = [
             "scenario": "general_reply",
         },
     ),
+    Document(
+        page_content=(
+            "发货时效规则：订单支付成功后应在承诺发货时效内安排发货。"
+            "若超过承诺时效仍未发货，客服应核实订单状态并向用户说明预计发货时间，"
+            "不得承诺未经仓库确认的具体日期。"
+        ),
+        metadata={
+            "source_id": "shipping_timeliness_rule",
+            "title": "发货时效与未发货处理规则",
+            "scenario": "shipping_timeliness",
+        },
+    ),
+    Document(
+        page_content=(
+            "退款处理规则：客服应先核实订单支付、发货和售后申请状态，再向用户说明退款条件、"
+            "处理方式和预计到账时效。未完成审核前，不得承诺退款一定成功。"
+        ),
+        metadata={
+            "source_id": "refund_processing_rule",
+            "title": "退款咨询处理规则",
+            "scenario": "refund",
+        },
+    ),
+    Document(
+        page_content=(
+            "退货申请规则：客服应确认商品是否满足退货条件，并向用户说明申请入口、寄回要求、"
+            "验收流程和退款处理方式。涉及质量问题时，应保留用户反馈和凭证。"
+        ),
+        metadata={
+            "source_id": "return_application_rule",
+            "title": "退货申请与寄回规则",
+            "scenario": "return",
+        },
+    ),
+    Document(
+        page_content=(
+            "运费咨询规则：客服应根据订单、活动和售后原因核实运费承担方；"
+            "涉及退货运费时，应先说明适用条件和处理标准，再给出下一步指引。"
+        ),
+        metadata={
+            "source_id": "freight_responsibility_rule",
+            "title": "运费与退货运费处理规则",
+            "scenario": "freight",
+        },
+    ),
 ]

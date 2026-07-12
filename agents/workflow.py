@@ -11,6 +11,8 @@ from agents.nodes.logistics_query_node import logistics_query_node
 from agents.nodes.order_extract_node import order_extract_node
 from agents.nodes.order_query_node import order_query_node
 from agents.nodes.policy_retrieval_node import policy_retrieval_node
+from agents.nodes.policy_rerank_node import policy_rerank_node
+from agents.nodes.query_rewrite_node import query_rewrite_node
 from agents.nodes.reply_generate_node import reply_generate_node
 from agents.nodes.ticket_create_node import ticket_create_node
 from agents.state import CopilotState
@@ -26,7 +28,9 @@ WORKFLOW_NODES: tuple[WorkflowNode, ...] = (
     order_query_node,
     logistics_query_node,
     abnormal_check_node,
+    query_rewrite_node,
     policy_retrieval_node,
+    policy_rerank_node,
     reply_generate_node,
     ticket_create_node,
     feishu_notify_node,

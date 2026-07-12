@@ -1,7 +1,7 @@
 from datetime import datetime
 from html import escape
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -9,6 +9,12 @@ from sqlalchemy.orm import Session, selectinload
 from models.agent_trace import AgentRun
 from models.business import Logistics, Order, Ticket
 from models.database import get_db
+from services.dashboard_service import (
+    get_agent_performance,
+    get_dashboard_overview,
+    get_ticket_stats,
+)
+from services.ticket_transition_service import TicketTransitionError, apply_ticket_transition
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -120,6 +126,20 @@ BASE_STYLE = """
     font-size: 12px;
   }
   .empty { color: var(--muted); padding: 12px 0; }
+  .filter-form, .action-form { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; }
+  .control { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+  select, input, button {
+    min-height: 34px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    padding: 6px 9px;
+  }
+  button { background: var(--accent); border-color: var(--accent); color: #ffffff; cursor: pointer; }
+  button:hover { background: #0a5c56; }
+  .action-form { margin-top: 10px; }
   @media (max-width: 760px) {
     .topbar { align-items: flex-start; flex-direction: column; }
     .grid { grid-template-columns: 1fr; }
@@ -147,6 +167,7 @@ def page(title: str, body: str) -> HTMLResponse:
         <h1>{escape(title)}</h1>
       </div>
       <nav class="nav">
+        <a href="/admin/dashboard">运营看板</a>
         <a href="/admin/tickets">工单</a>
         <a href="/admin/runs">Agent runs</a>
         <a href="/docs">Swagger</a>
@@ -195,20 +216,110 @@ def metric_grid(items: list[tuple[str, object]]) -> str:
     return f'<div class="grid">{fields}</div>'
 
 
+def percent_text(value: float | None) -> str:
+    if value is None:
+        return "-"
+    return f"{value * 100:.1f}%"
+
+
+def select_option(value: str, label: str, selected_value: str | None) -> str:
+    selected = " selected" if value == selected_value else ""
+    return f'<option value="{escape(value)}"{selected}>{escape(label)}</option>'
+
+
 @router.get("", include_in_schema=False)
 def admin_home() -> RedirectResponse:
     return RedirectResponse(url="/admin/tickets", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
+@router.get("/dashboard", response_class=HTMLResponse)
+def dashboard_page(db: Session = Depends(get_db)) -> HTMLResponse:
+    overview = get_dashboard_overview(db)
+    ticket_stats = get_ticket_stats(db)
+    agent_performance = get_agent_performance(db)
+
+    status_rows = "\n".join(
+        f"<tr><td>{text(item.key)}</td><td>{text(item.count)}</td></tr>"
+        for item in ticket_stats.status_counts
+    ) or '<tr><td colspan="2" class="empty">暂无工单数据。</td></tr>'
+    priority_rows = "\n".join(
+        f"<tr><td>{text(item.key)}</td><td>{text(item.count)}</td></tr>"
+        for item in ticket_stats.priority_counts
+    ) or '<tr><td colspan="2" class="empty">暂无工单数据。</td></tr>'
+    step_rows = "\n".join(
+        f"""
+        <tr>
+          <td>{text(item.step_name)}</td>
+          <td>{text(item.count)}</td>
+          <td>{text(item.success_count)}</td>
+          <td>{text(item.failed_count)}</td>
+          <td>{text(percent_text(item.success_rate))}</td>
+          <td>{text(item.average_duration_ms)}</td>
+        </tr>
+        """
+        for item in agent_performance.step_performance
+    ) or '<tr><td colspan="6" class="empty">暂无 Agent step 数据。</td></tr>'
+
+    body = f"""
+    <section class="panel">
+      <h2>运营概览</h2>
+      {metric_grid([
+          ("工单总数", overview.ticket_total),
+          ("待处理工单", overview.pending_ticket_count),
+          ("高优先级待处理", overview.high_priority_pending_ticket_count),
+          ("Agent Run 总数", overview.agent_run_total),
+          ("平均 Run 耗时 ms", overview.average_run_duration_ms),
+          ("Agent Run 成功率", percent_text(overview.agent_run_success_rate)),
+          ("飞书实际发送次数", overview.feishu_notification_attempt_count),
+          ("飞书通知成功率", percent_text(overview.feishu_notification_success_rate)),
+      ])}
+    </section>
+    <section class="panel">
+      <h2>工单状态分布</h2>
+      <table>
+        <thead><tr><th>状态</th><th>数量</th></tr></thead>
+        <tbody>{status_rows}</tbody>
+      </table>
+    </section>
+    <section class="panel">
+      <h2>工单优先级分布</h2>
+      <table>
+        <thead><tr><th>优先级</th><th>数量</th></tr></thead>
+        <tbody>{priority_rows}</tbody>
+      </table>
+    </section>
+    <section class="panel">
+      <h2>Agent Step 性能</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Step</th>
+            <th>执行次数</th>
+            <th>成功</th>
+            <th>失败</th>
+            <th>成功率</th>
+            <th>平均耗时 ms</th>
+          </tr>
+        </thead>
+        <tbody>{step_rows}</tbody>
+      </table>
+    </section>
+    """
+    return page("运营看板", body)
+
+
 @router.get("/tickets", response_class=HTMLResponse)
-def ticket_list_page(db: Session = Depends(get_db)) -> HTMLResponse:
-    tickets = list(
-        db.scalars(
-            select(Ticket)
-            .options(selectinload(Ticket.order))
-            .order_by(Ticket.created_at.desc())
-        )
-    )
+def ticket_list_page(
+    ticket_status: str | None = Query(default=None, alias="status"),
+    priority: str | None = None,
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    query = select(Ticket).options(selectinload(Ticket.order)).order_by(Ticket.created_at.desc())
+    if ticket_status:
+        query = query.where(Ticket.status == ticket_status)
+    if priority:
+        query = query.where(Ticket.priority == priority)
+    tickets = list(db.scalars(query))
 
     if tickets:
         rows = "\n".join(
@@ -220,16 +331,39 @@ def ticket_list_page(db: Session = Depends(get_db)) -> HTMLResponse:
               <td>{text(ticket.ticket_type)}</td>
               <td>{status_badge(ticket.priority)}</td>
               <td>{status_badge(ticket.status)}</td>
+              <td>{text(ticket.assigned_to)}</td>
               <td class="summary">{text(ticket.summary)}</td>
               <td>{time_text(ticket.created_at)}</td>
+              <td>{time_text(ticket.updated_at)}</td>
             </tr>
             """
             for ticket in tickets
         )
     else:
-        rows = '<tr><td colspan="8" class="empty">暂无工单。先调用 Copilot analyze 创建一条异常物流工单。</td></tr>'
+        rows = '<tr><td colspan="10" class="empty">没有符合当前筛选条件的工单。</td></tr>'
+
+    status_options = "".join(
+        [select_option("", "全部状态", ticket_status)]
+        + [
+            select_option(value, value, ticket_status)
+            for value in ("todo", "processing", "waiting_user", "waiting_vendor", "resolved", "closed")
+        ]
+    )
+    priority_options = "".join(
+        [select_option("", "全部优先级", priority)]
+        + [select_option(value, value, priority) for value in ("high", "normal", "low")]
+    )
 
     body = f"""
+    <section class="panel">
+      <h2>工单筛选</h2>
+      <form class="filter-form" method="get" action="/admin/tickets">
+        <label class="control">状态<select name="status">{status_options}</select></label>
+        <label class="control">优先级<select name="priority">{priority_options}</select></label>
+        <button type="submit">筛选</button>
+        <a href="/admin/tickets">清除筛选</a>
+      </form>
+    </section>
     <section class="panel">
       <h2>客服工单</h2>
       <table>
@@ -241,8 +375,10 @@ def ticket_list_page(db: Session = Depends(get_db)) -> HTMLResponse:
             <th>类型</th>
             <th>优先级</th>
             <th>状态</th>
+            <th>处理人</th>
             <th>摘要</th>
             <th>创建时间</th>
+            <th>更新时间</th>
           </tr>
         </thead>
         <tbody>{rows}</tbody>
@@ -250,6 +386,33 @@ def ticket_list_page(db: Session = Depends(get_db)) -> HTMLResponse:
     </section>
     """
     return page("客服工单", body)
+
+
+@router.post("/tickets/{ticket_id}/actions/{action}")
+def perform_ticket_action(
+    ticket_id: str,
+    action: str,
+    operator: str = Form(min_length=1, max_length=64),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    ticket = db.get(Ticket, ticket_id)
+    if ticket is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    try:
+        apply_ticket_transition(
+            db,
+            ticket=ticket,
+            action=action,
+            operator=operator,
+            event_type="manual_status_changed",
+            content_prefix="后台人工操作",
+        )
+    except TicketTransitionError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    db.commit()
+    return RedirectResponse(url=f"/admin/tickets/{ticket.ticket_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/tickets/{ticket_id}", response_class=HTMLResponse)
@@ -280,6 +443,21 @@ def ticket_detail_page(ticket_id: str, db: Session = Depends(get_db)) -> HTMLRes
     if not event_items:
         event_items = '<div class="empty">暂无工单事件。</div>'
 
+    action_labels = {"claim": "接单", "resolve": "解决", "reopen": "重新打开"}
+    available_action = {
+        "todo": "claim",
+        "processing": "resolve",
+        "resolved": "reopen",
+    }.get(ticket.status)
+    action_form = ""
+    if available_action:
+        action_form = f"""
+        <form class="action-form" method="post" action="/admin/tickets/{text(ticket.ticket_id)}/actions/{available_action}">
+          <label class="control">操作人<input name="operator" value="人工客服" maxlength="64" required></label>
+          <button type="submit">{action_labels[available_action]}</button>
+        </form>
+        """
+
     body = f"""
     <section class="panel">
       <h2>工单详情</h2>
@@ -298,6 +476,7 @@ def ticket_detail_page(ticket_id: str, db: Session = Depends(get_db)) -> HTMLRes
       <h2>处理建议</h2>
       <p><strong>摘要：</strong>{text(ticket.summary)}</p>
       <p><strong>建议动作：</strong>{text(ticket.suggested_action)}</p>
+      {action_form}
     </section>
     <section class="panel">
       <h2>订单与物流</h2>
