@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from models.agent_trace import AgentRun, AgentStep
 from models.database import get_db
 from schemas.agent_trace import AgentRunRead, AgentStepRead
+from services.demo_trace_service import create_demo_waterfall_run
 
 
 router = APIRouter(prefix="/api", tags=["agent trace"])
@@ -18,6 +19,16 @@ def get_run_or_404(db: Session, run_id: str) -> AgentRun:
             detail="Agent run not found",
         )
     return run
+
+
+@router.get("/runs", response_model=list[AgentRunRead])
+def list_agent_runs(db: Session = Depends(get_db)) -> list[AgentRun]:
+    return list(db.scalars(select(AgentRun).order_by(AgentRun.created_at.desc())))
+
+
+@router.post("/runs/demo-waterfall", response_model=AgentRunRead, status_code=status.HTTP_201_CREATED)
+def create_demo_waterfall(db: Session = Depends(get_db)) -> AgentRun:
+    return create_demo_waterfall_run(db)
 
 
 @router.get("/runs/{run_id}", response_model=AgentRunRead)

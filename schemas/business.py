@@ -74,6 +74,11 @@ class TicketUpdate(BaseModel):
     assigned_to: str | None = Field(default=None, max_length=64)
 
 
+class TicketActionRequest(BaseModel):
+    action: Literal["claim", "resolve", "reopen"]
+    operator: str = Field(min_length=1, max_length=64)
+
+
 class TicketRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

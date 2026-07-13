@@ -73,3 +73,69 @@ class TestAgentTraceApi(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["detail"], "Agent run not found")
+
+    def test_runs_can_be_listed_newest_first(self) -> None:
+        with SessionLocal() as db:
+            first_run = start_agent_run(
+                db,
+                session_id="SESSION-LIST-001",
+                user_id="USER-001",
+                user_message="订单 ORD-1001 还没收到",
+                intent="logistics_delay",
+            )
+            finish_agent_run(db, run_id=first_run.run_id, status="success")
+            second_run = start_agent_run(
+                db,
+                session_id="SESSION-LIST-002",
+                user_id="USER-002",
+                user_message="订单 ORD-1002 到哪里了？",
+                intent="logistics_query",
+            )
+            finish_agent_run(db, run_id=second_run.run_id, status="success")
+            first_run_id = first_run.run_id
+            second_run_id = second_run.run_id
+
+        response = self.client.get("/api/runs")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual([run["run_id"] for run in body], [second_run_id, first_run_id])
+        self.assertEqual(body[0]["user_message"], "订单 ORD-1002 到哪里了？")
+        self.assertEqual(body[0]["intent"], "logistics_query")
+
+    def test_demo_waterfall_run_has_proportional_step_durations(self) -> None:
+        response = self.client.post("/api/runs/demo-waterfall")
+
+        self.assertEqual(response.status_code, 201)
+        run_body = response.json()
+        self.assertTrue(run_body["run_id"].startswith("RUN-DEMO-"))
+        self.assertEqual(run_body["user_message"], "瀑布图示范链路：订单 ORD-1001 未收到")
+        self.assertEqual(run_body["status"], "success")
+        self.assertEqual(run_body["total_duration_ms"], 1745)
+
+        steps_response = self.client.get(f"/api/runs/{run_body['run_id']}/steps")
+
+        self.assertEqual(steps_response.status_code, 200)
+        steps_body = steps_response.json()
+        self.assertEqual(
+            [step["step_name"] for step in steps_body],
+            [
+                "intent_recognition",
+                "order_extract",
+                "order_query",
+                "logistics_query",
+                "abnormal_check",
+                "query_rewrite",
+                "policy_retrieval",
+                "policy_rerank",
+                "reply_generate",
+                "ticket_create",
+                "feishu_notify",
+            ],
+        )
+        self.assertEqual(
+            [step["duration_ms"] for step in steps_body],
+            [55, 20, 85, 120, 45, 130, 620, 340, 120, 90, 120],
+        )
+        self.assertEqual(steps_body[6]["step_type"], "rag")
+        self.assertEqual(steps_body[6]["status"], "success")

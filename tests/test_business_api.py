@@ -96,3 +96,31 @@ class TestBusinessApi(unittest.TestCase):
         self.assertEqual(list_response.status_code, 200)
         ticket_ids = {item["ticket_id"] for item in list_response.json()}
         self.assertIn(ticket_id, ticket_ids)
+
+    def test_ticket_action_updates_status_and_records_manual_event(self) -> None:
+        create_response = self.client.post(
+            "/api/tickets",
+            json={
+                "ticket_type": "logistics_delay",
+                "priority": "high",
+                "user_id": "USER-001",
+                "order_id": "ORD-1001",
+                "summary": "客户反馈订单一直没有收到，需要催物流。",
+                "suggested_action": "联系承运商核实卡点。",
+                "created_by": "agent",
+            },
+        )
+        ticket_id = create_response.json()["ticket_id"]
+
+        response = self.client.post(
+            f"/api/tickets/{ticket_id}/actions",
+            json={"action": "claim", "operator": "客服A"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        ticket = response.json()
+        self.assertEqual(ticket["status"], "processing")
+        self.assertEqual(ticket["assigned_to"], "客服A")
+        self.assertEqual(ticket["events"][-1]["event_type"], "manual_status_changed")
+        self.assertEqual(ticket["events"][-1]["from_status"], "todo")
+        self.assertEqual(ticket["events"][-1]["to_status"], "processing")

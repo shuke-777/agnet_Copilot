@@ -10,11 +10,13 @@ from schemas.business import (
     LogisticsRead,
     OrderRead,
     TicketCreate,
+    TicketActionRequest,
     TicketEventCreate,
     TicketEventRead,
     TicketRead,
     TicketUpdate,
 )
+from services.ticket_transition_service import TicketTransitionError, apply_ticket_transition
 
 
 router = APIRouter(prefix="/api", tags=["business"])
@@ -99,6 +101,29 @@ def update_ticket(ticket_id: str, payload: TicketUpdate, db: Session = Depends(g
     ticket.updated_at = utc_now()
     db.commit()
     db.refresh(ticket)
+    return get_ticket_or_404(db, ticket.ticket_id)
+
+
+@router.post("/tickets/{ticket_id}/actions", response_model=TicketRead)
+def apply_ticket_action(
+    ticket_id: str,
+    payload: TicketActionRequest,
+    db: Session = Depends(get_db),
+) -> Ticket:
+    ticket = get_ticket_or_404(db, ticket_id)
+    try:
+        apply_ticket_transition(
+            db,
+            ticket=ticket,
+            action=payload.action,
+            operator=payload.operator,
+            event_type="manual_status_changed",
+            content_prefix="后台人工操作",
+        )
+    except TicketTransitionError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    db.commit()
     return get_ticket_or_404(db, ticket.ticket_id)
 
 

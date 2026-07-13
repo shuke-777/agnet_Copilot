@@ -4,7 +4,7 @@
 
 - 项目定位：电商售后客服 Copilot
 - 当前阶段：M8 独立前端工作台
-- 当前里程碑：前端工程与页面设计
+- 当前里程碑：M8.5 React 运营看板联调
 
 ## 已完成
 
@@ -99,13 +99,35 @@
   - 飞书 Webhook disabled / failed / trace 记录
   - 飞书按钮回调、状态流转和事件记录
   - 最小客服后台页面
+- M8.1 前端工程骨架已完成：
+  - 新增独立 `frontend/` Vite + React + TypeScript 工程
+  - 已接入 Ant Design、React Router、Axios、Recharts 与 Vitest
+  - 默认路由为 `/workspace`，已提供工单中心、Agent 追踪、运营看板四个静态页面入口
+  - Vite 开发环境将 `/api` 代理至 `http://127.0.0.1:8001`
+  - 已完成根路径重定向与工单中心导航的自动化测试
+- M8.2 Copilot 工作台接口联调已完成：
+  - `/workspace` 支持输入用户售后问题，并通过 Vite `/api` 代理调用 `POST /api/copilot/analyze`
+  - 页面展示识别意图、订单号、物流异常判断、客服回复草稿、RAG 规则来源、工单结果、Run ID 与飞书通知状态
+  - 已提供请求中、接口失败和无规则召回时的页面状态
+  - Axios 客户端与 TypeScript 响应类型已集中到 `frontend/src/services/api.ts`
+  - 已完成异常物流真实联调：`ORD-1001` 可返回 RAG 来源并创建催物流工单
+- M8.3 React 工单中心联调已完成：
+  - `/tickets` 已对接 `GET /api/tickets`，展示工单 ID、订单号、类型、优先级、状态、处理人和摘要
+  - `/tickets/{ticketId}` 已展示工单详情、关联订单和物流信息、工单事件时间线
+  - 新增 `POST /api/tickets/{ticket_id}/actions` JSON API，支持 `claim`、`resolve`、`reopen` 三种合法人工状态操作
+  - 状态操作复用既有状态机，写入 `manual_status_changed` 工单事件；前端演示操作人固定为“客服A”
+  - 已完成前端单元测试、构建和后端全量 pytest 验证
+- M8.4 React Agent 追踪联调已完成：
+  - 新增 `GET /api/runs`，按创建时间倒序返回 Agent Run 列表
+  - `/runs` 已展示 Run ID、用户问题、意图、状态、总耗时和创建时间
+  - `/runs/{runId}` 已展示 Run 执行概览与完整 Step 时间线
+  - Step 时间线展示节点名称、类型、状态、耗时、输入摘要、输出摘要和失败信息
+  - 已完成 Run 列表 API、前端列表到详情跳转、Step 链路渲染的自动化测试
+  - Run 详情已升级为连续比例条式 Trace Waterfall：按 Step 耗时严格切分总时长，使用下方可点击图例与详情区展示节点信息
+  - 新增 `POST /api/runs/demo-waterfall`：生成独立的 `RUN-DEMO-*` 示例链路，含 11 个固定耗时 Step，便于直观看到瀑布图区块比例
 
 ## 下一步
 
-- M8.1：创建 `frontend/` 独立 Vite + React + TypeScript 工程，接入 Ant Design、React Router、Axios 和 Recharts。
-- M8.2：实现默认首页 `/workspace`，调用 `POST /api/copilot/analyze` 并展示 Copilot 分析、RAG 引用、工单与 Run 结果。
-- M8.3：实现 `/tickets`、`/tickets/{ticketId}`，补充面向独立前端的人工状态流转 JSON API。
-- M8.4：实现 `/runs`、`/runs/{runId}`，补充 `GET /api/runs` 并展示 Agent Step 执行链路。
 - M8.5：实现 `/dashboard`，对接现有 Dashboard API，完成前后端联调、Docker Compose 和验收。
 
 ## M8 约定
