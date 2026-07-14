@@ -4,6 +4,7 @@ langchain
 langchain-community
 langgraph
 pydantic
+python-dotenv
 pytest
 sqlalchemy
 uvicorn

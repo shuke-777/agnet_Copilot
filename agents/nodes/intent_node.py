@@ -1,6 +1,8 @@
 from sqlalchemy.orm import Session
 
 from agents.state import CopilotState
+from schemas.llm import IntentRecognitionResult
+from services.llm_gateway import LLMGateway
 from services.trace_service import record_agent_step
 
 
@@ -20,7 +22,15 @@ def recognize_intent(user_message: str) -> str:
 
 
 def intent_node(db: Session, state: CopilotState) -> CopilotState:
-    state.intent = recognize_intent(state.payload.user_message)
+    result = LLMGateway.from_environment().complete_structured(
+        system_prompt="你是电商售后意图分类器。只返回 JSON：{\"intent\": \"...\"}。",
+        user_prompt=(
+            "将用户问题分类为 refund、return、freight、shipping_timeliness、"
+            f"logistics_delay 或 unknown：{state.payload.user_message}"
+        ),
+        response_model=IntentRecognitionResult,
+    )
+    state.intent = result.value.intent if result.success else recognize_intent(state.payload.user_message)
     step = record_agent_step(
         db,
         run_id=state.run_id,
@@ -29,6 +39,12 @@ def intent_node(db: Session, state: CopilotState) -> CopilotState:
         status="success",
         input_summary=state.payload.user_message,
         output_summary=state.intent,
+        llm_provider=result.call.provider,
+        llm_model=result.call.model,
+        input_tokens=result.call.input_tokens,
+        output_tokens=result.call.output_tokens,
+        fallback_reason=result.call.fallback_reason,
+        duration_override_ms=result.call.duration_ms,
     )
     state.steps.append(step)
     return state

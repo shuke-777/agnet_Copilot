@@ -1,7 +1,7 @@
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from models.business import Logistics, Order, Ticket, TicketEvent, utc_now
@@ -29,7 +29,7 @@ def make_id(prefix: str) -> str:
 def get_ticket_or_404(db: Session, ticket_id: str) -> Ticket:
     ticket = db.scalar(
         select(Ticket)
-        .options(selectinload(Ticket.events))
+        .options(selectinload(Ticket.events), selectinload(Ticket.source_run))
         .where(Ticket.ticket_id == ticket_id)
     )
     if ticket is None:
@@ -77,12 +77,20 @@ def create_ticket(payload: TicketCreate, db: Session = Depends(get_db)) -> Ticke
 
 
 @router.get("/tickets", response_model=list[TicketRead])
-def list_tickets(db: Session = Depends(get_db)) -> list[Ticket]:
+def list_tickets(q: str | None = None, db: Session = Depends(get_db)) -> list[Ticket]:
+    statement = select(Ticket).options(selectinload(Ticket.events), selectinload(Ticket.source_run))
+    if q and q.strip():
+        query = q.strip().upper()
+        statement = statement.where(
+            or_(
+                Ticket.ticket_id.ilike(f"%{query}%"),
+                Ticket.source_run_id.ilike(f"%{query}%"),
+                Ticket.order_id.ilike(f"%{query}%"),
+            )
+        )
     return list(
         db.scalars(
-            select(Ticket)
-            .options(selectinload(Ticket.events))
-            .order_by(Ticket.created_at.desc())
+            statement.order_by(Ticket.created_at.desc())
         )
     )
 

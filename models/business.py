@@ -56,6 +56,9 @@ class Ticket(Base):
     status: Mapped[str] = mapped_column(String(32), default="todo", index=True)
     user_id: Mapped[str] = mapped_column(String(64), index=True)
     order_id: Mapped[str] = mapped_column(ForeignKey("orders.order_id"), index=True)
+    source_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("agent_runs.run_id"), nullable=True, index=True
+    )
     summary: Mapped[str] = mapped_column(Text)
     suggested_action: Mapped[str] = mapped_column(Text)
     assigned_to: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -64,6 +67,11 @@ class Ticket(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
     order: Mapped[Order] = relationship(back_populates="tickets")
+    source_run: Mapped["AgentRun | None"] = relationship(
+        "AgentRun",
+        back_populates="created_ticket",
+        foreign_keys=[source_run_id],
+    )
     events: Mapped[list["TicketEvent"]] = relationship(
         back_populates="ticket",
         cascade="all, delete-orphan",
@@ -74,6 +82,10 @@ class Ticket(Base):
         cascade="all, delete-orphan",
         order_by="FeishuEvent.created_at",
     )
+
+    @property
+    def source_run_created_at(self) -> datetime | None:
+        return self.source_run.created_at if self.source_run is not None else None
 
 
 class TicketEvent(Base):

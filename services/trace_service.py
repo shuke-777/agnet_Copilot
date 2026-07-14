@@ -46,6 +46,12 @@ def record_agent_step(
     input_summary: str | None = None,
     output_summary: str | None = None,
     error_message: str | None = None,
+    llm_provider: str | None = None,
+    llm_model: str | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    fallback_reason: str | None = None,
+    duration_override_ms: int | None = None,
 ) -> AgentStep:
     start_time = utc_now()
     end_time = utc_now()
@@ -57,10 +63,15 @@ def record_agent_step(
         status=status,
         start_time=start_time,
         end_time=end_time,
-        duration_ms=duration_ms(start_time, end_time),
+        duration_ms=duration_override_ms if duration_override_ms is not None else duration_ms(start_time, end_time),
         input_summary=input_summary,
         output_summary=output_summary,
         error_message=error_message,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        fallback_reason=fallback_reason,
     )
     db.add(step)
     db.commit()

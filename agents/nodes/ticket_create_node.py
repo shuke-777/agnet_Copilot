@@ -17,6 +17,7 @@ def ticket_create_node(db: Session, state: CopilotState) -> CopilotState:
         status="todo",
         user_id=state.order.user_id,
         order_id=state.order.order_id,
+        source_run_id=state.run_id,
         summary=f"用户反馈订单 {state.order.order_id} 未收到，物流疑似异常。",
         suggested_action="联系承运商核实物流卡点，并同步用户预计处理时效。",
         assigned_to=None,

@@ -20,6 +20,7 @@ def analyze_after_sales_issue(
     try:
         state = run_copilot_workflow(db=db, payload=payload, run_id=run.run_id)
         run.intent = state.intent
+        run.order_id = state.order_id
         db.commit()
         finish_agent_run(db, run_id=run.run_id, status="success")
         return CopilotAnalyzeResponse(

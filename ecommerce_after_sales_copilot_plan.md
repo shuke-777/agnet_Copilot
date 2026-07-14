@@ -179,6 +179,7 @@ updated_at
 
 ```text
 ticket_id
+source_run_id
 ticket_type
 priority
 status
@@ -211,6 +212,7 @@ created_at
 run_id
 session_id
 user_id
+order_id
 user_message
 intent
 status
@@ -273,6 +275,7 @@ Agent 接口：
 
 ```text
 POST /api/copilot/analyze
+GET  /api/runs?q=
 GET  /api/runs/{run_id}
 GET  /api/runs/{run_id}/steps
 ```
@@ -495,6 +498,21 @@ Docker Compose 同时启动前后端服务
 工单中心参考 Linear：高信息密度、状态与优先级清晰
 Agent 追踪参考 LangSmith / Datadog：Step 时间线、耗时、输入输出与错误可见
 统一使用深色侧边导航、浅灰工作区、白色内容面；蓝绿色表示主操作，红橙色仅用于异常和高优先级
+```
+
+### M8.6：前端业务关联与连续咨询
+
+```text
+数据关联：tickets.source_run_id 关联首次自动建单的 Agent Run；agent_runs.order_id 记录本轮识别订单
+SQLite 迁移：启动时无损补列、补索引，并从历史 ticket_create Step 回填可识别关联
+统一检索：工单中心与 Agent 追踪均支持 TCK-、RUN-、ORD- 三类 ID 查询
+工单中心：新增来源 Run、Agent 调用时间和跳转至 Trace Waterfall 的入口
+Agent 追踪：工单 ID 放在第一列，可跳转工单详情；未建单 Run 明确显示“未创建工单”
+连续咨询：同一 session_id 支持按顺序发送多轮消息，每轮独立创建 Agent Run
+会话上下文：请求携带有限轮次历史；当前消息缺少订单号时可从会话内最近消息回退识别
+新建咨询：工作台标题右侧提供显性按钮，生成新的 session_id 并清空当前会话，不删除历史 Run 和工单
+跨页状态：分析任务、会话结果与错误状态提升到路由外的全局 Context；跳转页面后任务继续执行
+全局提示：其他页面顶部显示分析中、已完成或失败状态；完成后工单中心与 Agent 追踪自动刷新
 ```
 
 ### M9：真实 LLM Gateway

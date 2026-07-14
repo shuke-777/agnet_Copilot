@@ -88,6 +88,8 @@ class TicketRead(BaseModel):
     status: str
     user_id: str
     order_id: str
+    source_run_id: str | None
+    source_run_created_at: datetime | None
     summary: str
     suggested_action: str
     assigned_to: str | None

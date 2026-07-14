@@ -11,3 +11,13 @@ services:
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - copilot
+    restart: unless-stopped

@@ -46,6 +46,12 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
         self.assertEqual(ticket["ticket_type"], "logistics_delay")
         self.assertEqual(ticket["status"], "todo")
         self.assertEqual(ticket["created_by"], "agent")
+        self.assertEqual(ticket["source_run_id"], body["run_id"])
+
+        run_response = self.client.get(f"/api/runs/{body['run_id']}")
+        self.assertEqual(run_response.status_code, 200)
+        self.assertEqual(run_response.json()["order_id"], "ORD-1001")
+        self.assertEqual(run_response.json()["ticket_id"], body["ticket_id"])
 
         steps_response = self.client.get(f"/api/runs/{body['run_id']}/steps")
         self.assertEqual(steps_response.status_code, 200)
@@ -69,6 +75,11 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
         feishu_step = steps_response.json()[-1]
         self.assertEqual(feishu_step["step_type"], "webhook")
         self.assertEqual(feishu_step["status"], "skipped")
+
+        intent_step = steps_response.json()[0]
+        self.assertEqual(intent_step["llm_provider"], "disabled")
+        self.assertEqual(intent_step["llm_model"], None)
+        self.assertEqual(intent_step["fallback_reason"], "LLM provider is disabled")
 
     def test_analyze_does_not_create_ticket_for_normal_logistics(self) -> None:
         with patch.dict("os.environ", {"FEISHU_WEBHOOK_URL": ""}):
@@ -157,3 +168,27 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "Order id not found in user message")
+
+    def test_analyze_uses_recent_session_history_when_message_has_no_order_id(self) -> None:
+        session_id = "SESSION-COPILOT-CONTEXT-001"
+        first_response = self.client.post(
+            "/api/copilot/analyze",
+            json={
+                "session_id": session_id,
+                "user_id": "USER-001",
+                "user_message": "订单 ORD-1001 一直没收到。",
+            },
+        )
+        self.assertEqual(first_response.status_code, 200)
+
+        second_response = self.client.post(
+            "/api/copilot/analyze",
+            json={
+                "session_id": session_id,
+                "user_id": "USER-001",
+                "user_message": "那请继续帮我催一下。",
+            },
+        )
+
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_response.json()["order_id"], "ORD-1001")

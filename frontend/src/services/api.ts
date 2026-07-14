@@ -37,6 +37,8 @@ export type Ticket = {
   status: string;
   user_id: string;
   order_id: string;
+  source_run_id: string | null;
+  source_run_created_at: string | null;
   summary: string;
   suggested_action: string;
   assigned_to: string | null;
@@ -66,6 +68,8 @@ export type AgentRun = {
   session_id: string;
   user_id: string | null;
   user_message: string;
+  order_id: string | null;
+  ticket_id: string | null;
   intent: string | null;
   status: string;
   total_duration_ms: number | null;
@@ -85,12 +89,49 @@ export type AgentStep = {
   input_summary: string | null;
   output_summary: string | null;
   error_message: string | null;
+  llm_provider?: string | null;
+  llm_model?: string | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  fallback_reason?: string | null;
+};
+
+export type MetricCount = { key: string; count: number };
+
+export type DashboardOverview = {
+  ticket_total: number;
+  pending_ticket_count: number;
+  high_priority_pending_ticket_count: number;
+  agent_run_total: number;
+  average_run_duration_ms: number | null;
+  agent_run_success_rate: number | null;
+  feishu_notification_attempt_count: number;
+  feishu_notification_success_rate: number | null;
+};
+
+export type TicketStats = { status_counts: MetricCount[]; priority_counts: MetricCount[] };
+
+export type StepPerformance = {
+  step_name: string;
+  count: number;
+  success_count: number;
+  failed_count: number;
+  success_rate: number | null;
+  average_duration_ms: number | null;
+};
+
+export type AgentPerformance = {
+  agent_run_total: number;
+  average_run_duration_ms: number | null;
+  agent_run_success_rate: number | null;
+  step_performance: StepPerformance[];
 };
 
 type AnalyzeCopilotInput = {
   session_id: string;
   user_id: string;
   user_message: string;
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
 };
 
 export async function analyzeCopilot(input: AnalyzeCopilotInput): Promise<CopilotAnalyzeResponse> {
@@ -98,8 +139,8 @@ export async function analyzeCopilot(input: AnalyzeCopilotInput): Promise<Copilo
   return response.data;
 }
 
-export async function listTickets(): Promise<Ticket[]> {
-  const response = await axios.get<Ticket[]>("/api/tickets");
+export async function listTickets(query?: string): Promise<Ticket[]> {
+  const response = await axios.get<Ticket[]>("/api/tickets", { params: query ? { q: query } : undefined });
   return response.data;
 }
 
@@ -127,8 +168,8 @@ export async function applyTicketAction(
   return response.data;
 }
 
-export async function listAgentRuns(): Promise<AgentRun[]> {
-  const response = await axios.get<AgentRun[]>("/api/runs");
+export async function listAgentRuns(query?: string): Promise<AgentRun[]> {
+  const response = await axios.get<AgentRun[]>("/api/runs", { params: query ? { q: query } : undefined });
   return response.data;
 }
 
@@ -139,5 +180,20 @@ export async function getAgentRun(runId: string): Promise<AgentRun> {
 
 export async function listAgentSteps(runId: string): Promise<AgentStep[]> {
   const response = await axios.get<AgentStep[]>(`/api/runs/${runId}/steps`);
+  return response.data;
+}
+
+export async function getDashboardOverview(): Promise<DashboardOverview> {
+  const response = await axios.get<DashboardOverview>("/api/dashboard/overview");
+  return response.data;
+}
+
+export async function getDashboardTicketStats(): Promise<TicketStats> {
+  const response = await axios.get<TicketStats>("/api/dashboard/ticket-stats");
+  return response.data;
+}
+
+export async function getAgentPerformance(): Promise<AgentPerformance> {
+  const response = await axios.get<AgentPerformance>("/api/dashboard/agent-performance");
   return response.data;
 }

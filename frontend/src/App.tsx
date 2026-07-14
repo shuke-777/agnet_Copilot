@@ -4,6 +4,7 @@ import {
   FileSearchOutlined,
   InboxOutlined,
   ArrowLeftOutlined,
+  PlusOutlined,
   SendOutlined,
   RobotOutlined,
 } from "@ant-design/icons";
@@ -27,12 +28,16 @@ import {
 } from "antd";
 import type { MenuProps } from "antd";
 import { useEffect, useState } from "react";
+import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 import {
   analyzeCopilot,
   applyTicketAction,
+  getAgentPerformance,
   getAgentRun,
+  getDashboardOverview,
+  getDashboardTicketStats,
   getLogistics,
   getOrder,
   getTicket,
@@ -40,7 +45,18 @@ import {
   listAgentSteps,
   listTickets,
 } from "./services/api";
-import type { AgentRun, AgentStep, CopilotAnalyzeResponse, Logistics, Order, Ticket } from "./services/api";
+import { CopilotAnalysisProvider, useCopilotAnalysis } from "./CopilotAnalysisContext";
+import type {
+  AgentPerformance,
+  AgentRun,
+  AgentStep,
+  CopilotAnalyzeResponse,
+  DashboardOverview,
+  Logistics,
+  Order,
+  Ticket,
+  TicketStats,
+} from "./services/api";
 
 const { Header, Content, Sider } = Layout;
 const { Title, Text } = Typography;
@@ -54,62 +70,49 @@ const navigationItems: NavigationItem[] = [
   { key: "/dashboard", icon: <BarChartOutlined />, label: <NavLink to="/dashboard">运营看板</NavLink> },
 ];
 
-function PageHeader({ title, description }: { title: string; description: string }) {
+function PageHeader({ title, description, extra }: { title: string; description: string; extra?: React.ReactNode }) {
   return (
     <div className="page-heading">
       <div>
         <Title level={2}>{title}</Title>
         <Text type="secondary">{description}</Text>
       </div>
-      <Tag color="blue">M8.1 页面骨架</Tag>
+      {extra || <Tag color="blue">M8.6 业务关联</Tag>}
     </div>
   );
 }
 
+function formatPercentage(value: number | null | undefined): string {
+  return value === null || value === undefined ? "-" : `${(value * 100).toFixed(1)}%`;
+}
+
 function WorkspacePage() {
-  const [form] = Form.useForm<{ userMessage: string }>();
-  const [result, setResult] = useState<CopilotAnalyzeResponse | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-
-  const handleAnalyze = async ({ userMessage }: { userMessage: string }) => {
-    setIsAnalyzing(true);
-    setErrorMessage(null);
-    setResult(null);
-
-    try {
-      const analysis = await analyzeCopilot({
-        session_id: `WEB-${Date.now()}`,
-        user_id: "客服A",
-        user_message: userMessage.trim(),
-      });
-      setResult(analysis);
-    } catch {
-      setErrorMessage("分析请求未完成，请确认后端服务已启动后重试。");
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
+  const { analyze, draft, errorMessage, isAnalyzing, messages, result, sessionId, setDraft, startNewConversation } = useCopilotAnalysis();
 
   return (
     <section>
-      <PageHeader title="Copilot 工作台" description="处理售后咨询、生成处理建议并保留人工确认节点。" />
+      <PageHeader
+        title="Copilot 工作台"
+        description="处理售后咨询、生成处理建议并保留人工确认节点。"
+        extra={<Button aria-label="新建咨询" icon={<PlusOutlined />} onClick={startNewConversation} disabled={isAnalyzing}>新建咨询</Button>}
+      />
       <div className="workspace-grid">
         <article className="work-panel work-panel-primary">
           <Text className="panel-eyebrow">待处理咨询</Text>
           <Title level={4}>提交一条售后咨询</Title>
-          <Form form={form} layout="vertical" onFinish={handleAnalyze} requiredMark={false}>
+          <Form layout="vertical" onFinish={analyze} requiredMark={false}>
             <Form.Item
               label="用户问题"
-              name="userMessage"
-              rules={[{ required: true, whitespace: true, message: "请输入用户的问题后再分析。" }]}
             >
               <Input.TextArea
+                aria-label="用户问题"
                 autoSize={{ minRows: 4, maxRows: 7 }}
                 placeholder="例如：订单 ORD-1001 一直没收到，帮我催一下物流。"
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
               />
             </Form.Item>
-            <Button htmlType="submit" icon={<SendOutlined />} loading={isAnalyzing} type="primary">
+            <Button htmlType="submit" icon={<SendOutlined />} loading={isAnalyzing} disabled={!draft.trim()} type="primary">
               开始分析
             </Button>
           </Form>
@@ -120,9 +123,17 @@ function WorkspacePage() {
             <strong>{result?.ticket_created ? "1" : "0"}</strong>
             <Text type="secondary">{result?.ticket_created ? "已创建待处理工单" : "等待人工确认"}</Text>
           </div>
-          <Text type="secondary">系统只给出建议与创建结果，状态推进仍由人工确认。</Text>
+          <Text type="secondary">当前会话：{sessionId}。系统只给出建议与创建结果，状态推进仍由人工确认。</Text>
         </article>
       </div>
+
+      {messages.length > 0 && (
+        <article className="conversation-history" aria-label="当前咨询记录">
+          {messages.filter((message) => message.role === "user").map((message, index) => (
+            <div className="conversation-user-message" key={`${message.content}-${index}`}>咨询 {index + 1}：{message.content}</div>
+          ))}
+        </article>
+      )}
 
       {isAnalyzing && (
         <div className="analysis-loading" role="status">
@@ -149,7 +160,7 @@ function WorkspacePage() {
             <Descriptions.Item label="识别意图">{result.intent}</Descriptions.Item>
             <Descriptions.Item label="订单号">{result.order_id || "未识别"}</Descriptions.Item>
             <Descriptions.Item label="工单结果">
-              {result.ticket_created && result.ticket_id ? result.ticket_id : "未创建工单"}
+              {result.ticket_created && result.ticket_id ? <Link to={`/tickets/${result.ticket_id}`}>{result.ticket_id}</Link> : "未创建工单"}
             </Descriptions.Item>
             <Descriptions.Item label="飞书通知">{result.feishu_status}</Descriptions.Item>
           </Descriptions>
@@ -185,7 +196,7 @@ function WorkspacePage() {
             <Space size="small">
               <CheckCircleOutlined />
               <Text type="secondary">Agent Run</Text>
-              <Text code>{result.run_id}</Text>
+              <Link to={`/runs/${result.run_id}`}><Text code>{result.run_id}</Text></Link>
             </Space>
             {result.ticket_created && <Tag color="blue">已创建催物流工单</Tag>}
           </div>
@@ -208,8 +219,8 @@ function StatusTag({ value }: { value: string }) {
   return <Tag color={tagColorByStatus[value]}>{value}</Tag>;
 }
 
-function formatDuration(duration: number | null) {
-  return duration === null ? "-" : `${duration} ms`;
+function formatDuration(duration: number | null | undefined) {
+  return duration === null || duration === undefined ? "-" : `${duration} ms`;
 }
 
 function sortAgentSteps(steps: AgentStep[]) {
@@ -289,12 +300,15 @@ function TraceWaterfall({
 
 function TicketsPage() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const { refreshToken } = useCopilotAnalysis();
 
   useEffect(() => {
     let isCurrent = true;
-    listTickets()
+    setIsLoading(true);
+    listTickets(query)
       .then((data) => {
         if (isCurrent) setTickets(data);
       })
@@ -307,7 +321,7 @@ function TicketsPage() {
     return () => {
       isCurrent = false;
     };
-  }, []);
+  }, [query, refreshToken]);
 
   const columns = [
     {
@@ -316,6 +330,16 @@ function TicketsPage() {
       render: (ticketId: string) => <Link to={`/tickets/${ticketId}`}>{ticketId}</Link>,
     },
     { title: "订单号", dataIndex: "order_id" },
+    {
+      title: "来源 Run",
+      dataIndex: "source_run_id",
+      render: (runId: string | null) => runId ? <Link to={`/runs/${runId}`}>{runId}</Link> : "人工创建",
+    },
+    {
+      title: "Agent 调用时间",
+      dataIndex: "source_run_created_at",
+      render: (value: string | null) => value ? new Date(value).toLocaleString("zh-CN") : "-",
+    },
     { title: "类型", dataIndex: "ticket_type" },
     { title: "优先级", dataIndex: "priority", render: (value: string) => <StatusTag value={value} /> },
     { title: "状态", dataIndex: "status", render: (value: string) => <StatusTag value={value} /> },
@@ -328,6 +352,14 @@ function TicketsPage() {
       <PageHeader title="工单中心" description="集中查看催物流工单和人工处理状态。" />
       {errorMessage && <Alert className="analysis-alert" message={errorMessage} showIcon type="error" />}
       <article className="data-panel">
+        <Input.Search
+          allowClear
+          className="table-search"
+          placeholder="搜索工单 ID、Run ID 或订单号"
+          value={query}
+          onChange={(event) => { if (!event.target.value) setQuery(""); }}
+          onSearch={(value) => setQuery(value.trim())}
+        />
         <Table<Ticket>
           columns={columns}
           dataSource={tickets}
@@ -422,6 +454,7 @@ function TicketDetailPage() {
           <Text className="panel-eyebrow">工单信息</Text>
           <Descriptions column={2} size="small">
             <Descriptions.Item label="订单号">{ticket.order_id}</Descriptions.Item>
+            <Descriptions.Item label="来源 Run">{ticket.source_run_id ? <Link to={`/runs/${ticket.source_run_id}`}>{ticket.source_run_id}</Link> : "人工创建，无关联 Run"}</Descriptions.Item>
             <Descriptions.Item label="处理人">{ticket.assigned_to || "未分配"}</Descriptions.Item>
             <Descriptions.Item label="问题摘要" span={2}>{ticket.summary}</Descriptions.Item>
             <Descriptions.Item label="建议动作" span={2}>{ticket.suggested_action}</Descriptions.Item>
@@ -453,12 +486,15 @@ function TicketDetailPage() {
 
 function RunsPage() {
   const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const { refreshToken } = useCopilotAnalysis();
 
   useEffect(() => {
     let isCurrent = true;
-    listAgentRuns()
+    setIsLoading(true);
+    listAgentRuns(query)
       .then((data) => {
         if (isCurrent) setRuns(data);
       })
@@ -471,10 +507,12 @@ function RunsPage() {
     return () => {
       isCurrent = false;
     };
-  }, []);
+  }, [query, refreshToken]);
 
   const columns = [
+    { title: "工单 ID", dataIndex: "ticket_id", render: (ticketId: string | null) => ticketId ? <Link to={`/tickets/${ticketId}`}>{ticketId}</Link> : "未创建工单" },
     { title: "Run ID", dataIndex: "run_id", render: (runId: string) => <Link to={`/runs/${runId}`}>{runId}</Link> },
+    { title: "订单号", dataIndex: "order_id", render: (value: string | null) => value || "未识别" },
     { title: "用户问题", dataIndex: "user_message", ellipsis: true },
     { title: "意图", dataIndex: "intent", render: (value: string | null) => value || "未识别" },
     { title: "状态", dataIndex: "status", render: (value: string) => <StatusTag value={value} /> },
@@ -487,6 +525,14 @@ function RunsPage() {
       <PageHeader title="Agent 追踪" description="查看每次 Copilot 执行的步骤、状态和耗时。" />
       {errorMessage && <Alert className="analysis-alert" message={errorMessage} showIcon type="error" />}
       <article className="data-panel">
+        <Input.Search
+          allowClear
+          className="table-search"
+          placeholder="搜索工单 ID、Run ID 或订单号"
+          value={query}
+          onChange={(event) => { if (!event.target.value) setQuery(""); }}
+          onSearch={(value) => setQuery(value.trim())}
+        />
         <Table<AgentRun>
           columns={columns}
           dataSource={runs}
@@ -587,6 +633,8 @@ function RunDetailPage() {
             {selectedStep.input_summary && <Text className="step-summary" type="secondary">输入：{selectedStep.input_summary}</Text>}
             {selectedStep.output_summary && <Text className="step-summary">输出：{selectedStep.output_summary}</Text>}
             {selectedStep.error_message && <Text className="step-summary" type="danger">错误：{selectedStep.error_message}</Text>}
+            {selectedStep.llm_provider && <Text className="step-summary" type="secondary">模型：{selectedStep.llm_provider}{selectedStep.llm_model ? ` / ${selectedStep.llm_model}` : ""}；输入 Token：{selectedStep.input_tokens ?? "-"}；输出 Token：{selectedStep.output_tokens ?? "-"}</Text>}
+            {selectedStep.fallback_reason && <Text className="step-summary" type="warning">降级：{selectedStep.fallback_reason}</Text>}
           </div>
         )}
       </article>
@@ -595,28 +643,81 @@ function RunDetailPage() {
 }
 
 function DashboardPage() {
+  const [overview, setOverview] = useState<DashboardOverview | null>(null);
+  const [ticketStats, setTicketStats] = useState<TicketStats | null>(null);
+  const [agentPerformance, setAgentPerformance] = useState<AgentPerformance | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasPartialError, setHasPartialError] = useState(false);
+
+  useEffect(() => {
+    let isCurrent = true;
+    Promise.allSettled([getDashboardOverview(), getDashboardTicketStats(), getAgentPerformance()])
+      .then(([overviewResult, ticketStatsResult, agentPerformanceResult]) => {
+        if (!isCurrent) return;
+        if (overviewResult.status === "fulfilled") setOverview(overviewResult.value);
+        if (ticketStatsResult.status === "fulfilled") setTicketStats(ticketStatsResult.value);
+        if (agentPerformanceResult.status === "fulfilled") setAgentPerformance(agentPerformanceResult.value);
+        setHasPartialError([overviewResult, ticketStatsResult, agentPerformanceResult].some((result) => result.status === "rejected"));
+      })
+      .finally(() => {
+        if (isCurrent) setIsLoading(false);
+      });
+    return () => { isCurrent = false; };
+  }, []);
+
+  const metricCards = [
+    ["工单总量", overview?.ticket_total ?? "-", "累计进入售后流程的工单"],
+    ["待处理工单", overview?.pending_ticket_count ?? "-", `其中高优先级 ${overview?.high_priority_pending_ticket_count ?? "-"}`],
+    ["Agent 成功率", formatPercentage(overview?.agent_run_success_rate), `共 ${overview?.agent_run_total ?? "-"} 次运行`],
+    ["飞书通知成功率", formatPercentage(overview?.feishu_notification_success_rate), `已尝试 ${overview?.feishu_notification_attempt_count ?? "-"} 次`],
+  ] as const;
+  const statusColors = ["#5b7cfa", "#48bdb9", "#f0a23a", "#9365c7", "#8b96a8"];
+  const priorityColors = ["#cf3f4f", "#f0a23a", "#5b7cfa", "#8b96a8"];
+  const stepColumns = [
+    { title: "Step", dataIndex: "step_name" },
+    { title: "执行次数", dataIndex: "count", width: 100 },
+    { title: "成功", dataIndex: "success_count", width: 80 },
+    { title: "失败", dataIndex: "failed_count", width: 80 },
+    { title: "成功率", dataIndex: "success_rate", width: 100, render: (value: number | null) => formatPercentage(value) },
+    { title: "平均耗时", dataIndex: "average_duration_ms", width: 115, render: (value: number | null) => formatDuration(value) },
+  ];
+
   return (
     <section>
       <PageHeader title="运营看板" description="关注工单处理、Agent 成功率与通知结果。" />
-      <div className="dashboard-placeholder">
-        {[
-          ["工单总量", "-"],
-          ["异常物流", "-"],
-          ["Agent 成功率", "-"],
-          ["飞书通知", "-"],
-        ].map(([label, value]) => (
-          <article className="metric-card" key={label}>
-            <Text type="secondary">{label}</Text>
-            <strong>{value}</strong>
+      {hasPartialError && <Alert className="analysis-alert" message="部分运营数据暂时无法加载，请稍后刷新重试。" showIcon type="warning" />}
+      {isLoading ? <div className="analysis-loading" role="status"><Spin /><Text>正在加载运营数据...</Text></div> : <>
+        <div className="dashboard-placeholder">
+          {metricCards.map(([label, value, hint]) => <article aria-label={`指标 ${label}: ${value}`} className="metric-card" key={label}>
+            <Text type="secondary">{label}</Text><strong>{value}</strong><Text type="secondary">{hint}</Text>
+          </article>)}
+        </div>
+        <div className="dashboard-chart-grid">
+          <article className="data-panel dashboard-chart-panel">
+            <Text className="panel-eyebrow">工单状态分布</Text>
+            {ticketStats?.status_counts.length ? <ResponsiveContainer height={240} width="100%"><BarChart data={ticketStats.status_counts} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}><XAxis dataKey="key" tickLine={false} axisLine={false} /><YAxis allowDecimals={false} tickLine={false} axisLine={false} /><Tooltip cursor={{ fill: "#f1f5f9" }} /><Bar dataKey="count" name="工单数" radius={[4, 4, 0, 0]}>{ticketStats.status_counts.map((item, index) => <Cell fill={statusColors[index % statusColors.length]} key={item.key} />)}</Bar></BarChart></ResponsiveContainer> : <DashboardEmpty text="暂无工单状态数据。" />}
           </article>
-        ))}
-      </div>
+          <article className="data-panel dashboard-chart-panel">
+            <Text className="panel-eyebrow">工单优先级分布</Text>
+            {ticketStats?.priority_counts.length ? <div className="dashboard-pie-layout"><ResponsiveContainer height={220} width="55%"><PieChart><Tooltip /><Pie data={ticketStats.priority_counts} dataKey="count" nameKey="key" innerRadius={52} outerRadius={82} paddingAngle={2}>{ticketStats.priority_counts.map((item, index) => <Cell fill={priorityColors[index % priorityColors.length]} key={item.key} />)}</Pie></PieChart></ResponsiveContainer><div className="dashboard-legend">{ticketStats.priority_counts.map((item, index) => <div key={item.key}><i style={{ background: priorityColors[index % priorityColors.length] }} />{item.key}<strong>{item.count}</strong></div>)}</div></div> : <DashboardEmpty text="暂无工单优先级数据。" />}
+          </article>
+        </div>
+        <article className="data-panel dashboard-performance-panel">
+          <div className="dashboard-performance-heading"><div><Text className="panel-eyebrow">Agent Step 性能</Text><Text type="secondary">平均 Run 耗时：{formatDuration(agentPerformance?.average_run_duration_ms)}</Text></div><Tag color={agentPerformance?.agent_run_success_rate === 1 ? "green" : "blue"}>运行成功率 {formatPercentage(agentPerformance?.agent_run_success_rate)}</Tag></div>
+          <Table columns={stepColumns} dataSource={agentPerformance?.step_performance ?? []} pagination={false} rowKey="step_name" locale={{ emptyText: "暂无 Agent Step 性能数据。" }} size="middle" />
+        </article>
+      </>}
     </section>
   );
 }
 
+function DashboardEmpty({ text }: { text: string }) {
+  return <div className="dashboard-empty"><Text type="secondary">{text}</Text></div>;
+}
+
 function AppShell() {
   const location = useLocation();
+  const { errorMessage, isAnalyzing, result } = useCopilotAnalysis();
 
   return (
     <Layout className="app-shell">
@@ -640,6 +741,9 @@ function AppShell() {
         <Header className="app-header">
           <Text className="header-context">售后运营中心</Text>
           <Space size="middle">
+            {location.pathname !== "/workspace" && isAnalyzing && <Link to="/workspace"><Badge status="processing" text="Copilot 分析中" /></Link>}
+            {location.pathname !== "/workspace" && !isAnalyzing && result && <Link to={`/runs/${result.run_id}`}><Badge status="success" text="最近分析已完成" /></Link>}
+            {location.pathname !== "/workspace" && errorMessage && <Link to="/workspace"><Badge status="error" text="最近分析失败" /></Link>}
             <Button type="text">帮助</Button>
             <Avatar size="small">A</Avatar>
             <Text>客服A</Text>
@@ -663,5 +767,5 @@ function AppShell() {
 }
 
 export default function App() {
-  return <AppShell />;
+  return <CopilotAnalysisProvider><AppShell /></CopilotAnalysisProvider>;
 }

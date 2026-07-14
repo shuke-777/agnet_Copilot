@@ -14,6 +14,7 @@ class AgentRun(Base):
     session_id: Mapped[str] = mapped_column(String(64), index=True)
     user_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     user_message: Mapped[str] = mapped_column(Text)
+    order_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     intent: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(32), default="running", index=True)
     total_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -26,6 +27,16 @@ class AgentRun(Base):
         cascade="all, delete-orphan",
         order_by="AgentStep.start_time",
     )
+    created_ticket: Mapped["Ticket | None"] = relationship(
+        "Ticket",
+        back_populates="source_run",
+        uselist=False,
+        foreign_keys="Ticket.source_run_id",
+    )
+
+    @property
+    def ticket_id(self) -> str | None:
+        return self.created_ticket.ticket_id if self.created_ticket is not None else None
 
 
 class AgentStep(Base):
@@ -42,5 +53,10 @@ class AgentStep(Base):
     input_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     output_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    llm_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    llm_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fallback_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     run: Mapped[AgentRun] = relationship(back_populates="steps")

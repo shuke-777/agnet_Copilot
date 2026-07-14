@@ -1,8 +1,8 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axios from "axios";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 
@@ -11,6 +11,8 @@ vi.mock("axios");
 const mockedAxios = vi.mocked(axios, { deep: true });
 
 describe("App", () => {
+  afterEach(() => cleanup());
+
   beforeEach(() => {
     mockedAxios.get.mockReset();
     mockedAxios.post.mockReset();
@@ -78,6 +80,41 @@ describe("App", () => {
     expect(screen.getByText("TCK-1001")).toBeInTheDocument();
     expect(screen.getByText("RUN-1001")).toBeInTheDocument();
     expect(screen.getByText("物流超过 72 小时未更新处理 SOP")).toBeInTheDocument();
+  });
+
+  it("keeps one session across turns and lets the agent start a new consultation", async () => {
+    const user = userEvent.setup();
+    mockedAxios.post.mockResolvedValue({
+      data: {
+        run_id: "RUN-CONTEXT-001",
+        intent: "logistics_delay",
+        order_id: "ORD-1001",
+        is_abnormal: true,
+        reply_draft: "已记录本次咨询。",
+        ticket_created: false,
+        ticket_id: null,
+        feishu_status: "skipped",
+        policy_sources: [],
+      },
+    });
+
+    render(<MemoryRouter initialEntries={["/workspace"]}><App /></MemoryRouter>);
+    const input = screen.getByRole("textbox", { name: "用户问题" });
+    await user.type(input, "订单 ORD-1001 还没收到。");
+    await user.click(screen.getByRole("button", { name: /开始分析/ }));
+    await screen.findByText("已记录本次咨询。");
+
+    await user.type(input, "请继续跟进。");
+    await user.click(screen.getByRole("button", { name: /开始分析/ }));
+
+    const firstPayload = mockedAxios.post.mock.calls[0][1] as { session_id: string };
+    const secondPayload = mockedAxios.post.mock.calls[1][1] as { session_id: string; history: Array<{ content: string }> };
+    expect(secondPayload.session_id).toBe(firstPayload.session_id);
+    expect(secondPayload.history[0].content).toBe("订单 ORD-1001 还没收到。");
+
+    await user.click(screen.getByRole("button", { name: "新建咨询" }));
+    expect(screen.getByRole("textbox", { name: "用户问题" })).toHaveValue("");
+    expect(screen.queryByText("已记录本次咨询。")).not.toBeInTheDocument();
   });
 
   it("loads tickets, opens the detail page, and lets an agent claim a ticket", async () => {
@@ -229,6 +266,11 @@ describe("App", () => {
               input_summary: "订单未收到",
               output_summary: "识别物流异常意图",
               error_message: null,
+              llm_provider: "openai_compatible",
+              llm_model: "test-model",
+              input_tokens: 24,
+              output_tokens: 8,
+              fallback_reason: null,
             },
             {
               step_id: "STP-1002",
@@ -297,6 +339,7 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "轨道节点 order_query" })).toHaveClass("trace-segment-tool");
     expect(screen.getByRole("button", { name: "轨道节点 policy_retrieval" })).toHaveClass("trace-segment-failed");
     expect(await screen.findByText("输出：识别物流异常意图")).toBeInTheDocument();
+    expect(screen.getByText("模型：openai_compatible / test-model；输入 Token：24；输出 Token：8")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "轨道节点 policy_retrieval" }));
     expect(await screen.findByText("错误：知识库暂不可用")).toBeInTheDocument();
@@ -337,5 +380,109 @@ describe("App", () => {
     );
 
     expect(await screen.findByText("该 Run 暂无可展示的 Step 记录。")).toBeInTheDocument();
+  });
+
+  it("loads live dashboard metrics, distributions, and agent performance", async () => {
+    mockedAxios.get.mockImplementation((url) => {
+      if (url === "/api/dashboard/overview") {
+        return Promise.resolve({
+          data: {
+            ticket_total: 12,
+            pending_ticket_count: 5,
+            high_priority_pending_ticket_count: 2,
+            agent_run_total: 20,
+            average_run_duration_ms: 486.5,
+            agent_run_success_rate: 0.95,
+            feishu_notification_attempt_count: 8,
+            feishu_notification_success_rate: 0.875,
+          },
+        });
+      }
+      if (url === "/api/dashboard/ticket-stats") {
+        return Promise.resolve({
+          data: {
+            status_counts: [{ key: "todo", count: 3 }, { key: "resolved", count: 7 }],
+            priority_counts: [{ key: "high", count: 2 }, { key: "normal", count: 8 }],
+          },
+        });
+      }
+      if (url === "/api/dashboard/agent-performance") {
+        return Promise.resolve({
+          data: {
+            agent_run_total: 20,
+            average_run_duration_ms: 486.5,
+            agent_run_success_rate: 0.95,
+            step_performance: [{
+              step_name: "policy_retrieval",
+              count: 20,
+              success_count: 19,
+              failed_count: 1,
+              success_rate: 0.95,
+              average_duration_ms: 125.4,
+            }],
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`));
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/dashboard"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByLabelText("指标 工单总量: 12")).toBeInTheDocument();
+    expect(screen.getByLabelText("指标 待处理工单: 5")).toBeInTheDocument();
+    expect(screen.getByLabelText("指标 Agent 成功率: 95.0%")).toBeInTheDocument();
+    expect(screen.getByLabelText("指标 飞书通知成功率: 87.5%")).toBeInTheDocument();
+    expect(screen.getByText("工单状态分布")).toBeInTheDocument();
+    expect(screen.getAllByText("policy_retrieval")).toHaveLength(1);
+    expect(mockedAxios.get).toHaveBeenCalledWith("/api/dashboard/overview");
+    expect(mockedAxios.get).toHaveBeenCalledWith("/api/dashboard/ticket-stats");
+    expect(mockedAxios.get).toHaveBeenCalledWith("/api/dashboard/agent-performance");
+  });
+
+  it("keeps dashboard metrics visible when a secondary dashboard request fails", async () => {
+    mockedAxios.get.mockImplementation((url) => {
+      if (url === "/api/dashboard/overview") {
+        return Promise.resolve({
+          data: {
+            ticket_total: 1,
+            pending_ticket_count: 1,
+            high_priority_pending_ticket_count: 1,
+            agent_run_total: 1,
+            average_run_duration_ms: null,
+            agent_run_success_rate: 1,
+            feishu_notification_attempt_count: 0,
+            feishu_notification_success_rate: null,
+          },
+        });
+      }
+      if (url === "/api/dashboard/ticket-stats") {
+        return Promise.reject(new Error("network error"));
+      }
+      if (url === "/api/dashboard/agent-performance") {
+        return Promise.resolve({
+          data: {
+            agent_run_total: 1,
+            average_run_duration_ms: null,
+            agent_run_success_rate: 1,
+            step_performance: [],
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`));
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/dashboard"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByLabelText("指标 工单总量: 1")).toBeInTheDocument();
+    expect(await screen.findByText("部分运营数据暂时无法加载，请稍后刷新重试。"))
+      .toBeInTheDocument();
   });
 });

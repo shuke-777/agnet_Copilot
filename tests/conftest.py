@@ -9,6 +9,8 @@ TEST_DATABASE_PATH = PROJECT_ROOT / "data" / "test.db"
 
 # Set this before test modules import the application and database engine.
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{TEST_DATABASE_PATH}")
+# Tests must never use a developer's locally configured paid or local model service.
+os.environ["LLM_PROVIDER"] = "disabled"
 
 
 @pytest.fixture(autouse=True)

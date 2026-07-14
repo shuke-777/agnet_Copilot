@@ -17,6 +17,11 @@ class AgentStepRead(BaseModel):
     input_summary: str | None
     output_summary: str | None
     error_message: str | None
+    llm_provider: str | None
+    llm_model: str | None
+    input_tokens: int | None
+    output_tokens: int | None
+    fallback_reason: str | None
 
 
 class AgentRunRead(BaseModel):
@@ -26,6 +31,8 @@ class AgentRunRead(BaseModel):
     session_id: str
     user_id: str | None
     user_message: str
+    order_id: str | None
+    ticket_id: str | None
     intent: str | None
     status: str
     total_duration_ms: int | None

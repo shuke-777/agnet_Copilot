@@ -58,7 +58,7 @@
 docker compose up --build
 ```
 
-首次启动会构建镜像，并创建 `data/app.db`。`./data` 会挂载到容器内，因此重启容器不会丢失工单、Agent Run 与其他本地数据。
+首次启动会构建后端与 React 前端镜像，并创建 `data/app.db`。`./data` 会挂载到容器内，因此重启容器不会丢失工单、Agent Run 与其他本地数据。浏览器访问前端后，Nginx 会将 `/api/*` 请求转发到 FastAPI 容器。
 
 后台运行：
 
@@ -93,6 +93,10 @@ docker compose up --build
 | --- | --- |
 | Swagger API 文档 | `http://127.0.0.1:8001/docs` |
 | 健康检查 | `http://127.0.0.1:8001/health` |
+| React Copilot 工作台 | `http://127.0.0.1:5173/workspace` |
+| React 工单中心 | `http://127.0.0.1:5173/tickets` |
+| React Agent 追踪 | `http://127.0.0.1:5173/runs` |
+| React 运营看板 | `http://127.0.0.1:5173/dashboard` |
 | 客服工单后台 | `http://127.0.0.1:8001/admin/tickets` |
 | Agent Run 后台 | `http://127.0.0.1:8001/admin/runs` |
 | 运营看板 | `http://127.0.0.1:8001/admin/dashboard` |
@@ -101,6 +105,29 @@ docker compose up --build
 
 - `ORD-1001`：物流异常，用于测试自动创建催物流工单。
 - `ORD-1002`：物流正常，用于测试不创建工单的流程。
+
+## 可选：接入真实 LLM
+
+默认配置为 `LLM_PROVIDER=disabled`，系统不会发出模型请求，并完整保留确定性意图识别、订单号提取、查询改写和回复模板逻辑。
+
+在项目根目录创建 `.env`，并参考 [`.env.example`](.env.example) 写入所需变量。后端启动后会自动读取该文件；终端或 PyCharm Run Configuration 中显式设置的同名变量优先级更高。
+
+```bash
+# OpenAI-compatible 服务
+export LLM_PROVIDER=openai_compatible
+export LLM_BASE_URL='https://你的服务地址/v1'
+export LLM_API_KEY='你的密钥'
+export LLM_MODEL='你的模型名'
+```
+
+```bash
+# 本地 Ollama
+export LLM_PROVIDER=ollama
+export LLM_BASE_URL='http://127.0.0.1:11434'
+export LLM_MODEL='qwen3:8b'
+```
+
+Gateway 仅将真实模型用于意图识别、订单号提取、RAG 查询改写和客服回复草稿。订单/物流查询、异常判断、建单、工单状态流转和飞书通知仍由确定性业务代码执行。模型超时、网络失败、无效 JSON 或结构化结果不合格时，系统会自动降级到确定性逻辑；Run Step 会记录 provider、model、Token 用量和降级原因。
 
 ## 演示流程
 
@@ -225,6 +252,6 @@ curl -s -X POST http://127.0.0.1:8001/api/copilot/analyze \
 ## 当前边界与后续演进
 
 - 当前使用 SQLite 和本地演示数据，未连接真实电商平台。
-- 默认不调用真实飞书、LLM 或付费 embedding API。
+- 默认不调用真实飞书、LLM 或付费 embedding API；真实 LLM 仅在手动配置 Gateway 后启用。
 - 当前仅对物流异常自动建单；退款、退货等真实交易状态机待后续扩展。
 - 随着知识库规模增长，可将 FAISS 替换为 Milvus、pgvector 或 Qdrant，并接入真实 embedding 与 reranker。

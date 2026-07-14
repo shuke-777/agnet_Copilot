@@ -124,3 +124,20 @@ class TestBusinessApi(unittest.TestCase):
         self.assertEqual(ticket["events"][-1]["event_type"], "manual_status_changed")
         self.assertEqual(ticket["events"][-1]["from_status"], "todo")
         self.assertEqual(ticket["events"][-1]["to_status"], "processing")
+
+    def test_tickets_can_be_filtered_by_ticket_run_or_order_id(self) -> None:
+        created = self.client.post(
+            "/api/tickets",
+            json={
+                "ticket_type": "logistics_delay",
+                "priority": "high",
+                "user_id": "USER-001",
+                "order_id": "ORD-1001",
+                "summary": "用于检索测试的工单。",
+                "suggested_action": "人工跟进。",
+                "created_by": "manual",
+            },
+        ).json()
+
+        self.assertEqual(self.client.get(f"/api/tickets?q={created['ticket_id']}").json()[0]["ticket_id"], created["ticket_id"])
+        self.assertEqual(self.client.get("/api/tickets?q=ORD-1001").json()[0]["order_id"], "ORD-1001")

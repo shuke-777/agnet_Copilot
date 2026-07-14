@@ -3,8 +3,8 @@
 ## 项目状态
 
 - 项目定位：电商售后客服 Copilot
-- 当前阶段：M8 独立前端工作台
-- 当前里程碑：M8.5 React 运营看板联调
+- 当前阶段：M10 Redis 缓存、限流与运营风险榜
+- 当前里程碑：M8.6 已完成；M9 已完成，Docker Compose 联合验收延后至最终交付
 
 ## 已完成
 
@@ -125,10 +125,30 @@
   - 已完成 Run 列表 API、前端列表到详情跳转、Step 链路渲染的自动化测试
   - Run 详情已升级为连续比例条式 Trace Waterfall：按 Step 耗时严格切分总时长，使用下方可点击图例与详情区展示节点信息
   - 新增 `POST /api/runs/demo-waterfall`：生成独立的 `RUN-DEMO-*` 示例链路，含 11 个固定耗时 Step，便于直观看到瀑布图区块比例
+- M8.5 React 运营看板联调已完成：
+  - `/dashboard` 已并发对接 `GET /api/dashboard/overview`、`GET /api/dashboard/ticket-stats`、`GET /api/dashboard/agent-performance`
+  - 已展示工单总量、待处理/高优先级工单、Agent 成功率、飞书通知成功率等真实指标
+  - 已展示工单状态柱状图、工单优先级环形图与 Agent Step 性能表
+  - 任一统计接口失败时保留其余已加载的数据，并展示局部降级提示
+  - 前端测试环境已补齐 Recharts 所需的 `ResizeObserver` mock
+  - 已完成前端 Vitest、生产构建和后端全量 pytest 验证
+- M9 真实 LLM Gateway 已完成：
+  - 新增统一 HTTP Gateway，支持 `disabled`、`openai_compatible` 与 `ollama` 三种模式。
+  - 默认 `disabled`，不调用真实模型；模型超时、网络失败、无效 JSON 或结构化输出校验失败时，自动降级到既有确定性逻辑。
+  - 真实模型只增强意图识别、订单号提取、RAG 查询改写和客服回复草稿；订单/物流查询、异常判断、建单、状态流转和飞书通知继续由确定性业务代码控制。
+  - `agent_steps` 新增 provider、model、输入/输出 Token 和降级原因；本地已有 SQLite 数据库启动时会幂等补齐字段。
+  - React Run 详情页展示模型调用元数据与降级原因；新增 `.env.example` 和 README 配置说明。
+- M8.6 前端业务关联与连续咨询已完成：
+  - `tickets.source_run_id` 关联首次自动建单的 Agent Run；`agent_runs.order_id` 记录本轮识别订单。SQLite 启动时无损补列、补索引，并从历史 `ticket_create` Step 回填可识别关联。
+  - 工单中心与 Agent 追踪支持按 `TCK-`、`RUN-`、`ORD-` 统一检索，提供双向跳转；工单中心展示来源 Run 与 Agent 调用时间，Agent 追踪第一列展示工单 ID。
+  - Copilot 工作台支持同一 `session_id` 的连续多轮咨询；当前消息缺少订单号时，后端可从请求历史或该会话最近 Run 回退识别订单。
+  - 新增显性“新建咨询”按钮，仅清空当前标签页会话、草稿和结果，不删除历史 Run 或工单。
+  - 分析任务、结果和错误状态提升到路由外 Context；切换页面后任务继续执行，其他页面显示轻量状态提示，完成后工单与 Run 列表自动刷新。
 
 ## 下一步
 
-- M8.5：实现 `/dashboard`，对接现有 Dashboard API，完成前后端联调、Docker Compose 和验收。
+- M10：Redis 缓存、按 `user_id` 的令牌桶限流、Dashboard 缓存失效与运营风险榜。
+- 最终交付：完成前后端 Docker Compose 联合启动、浏览器验收和镜像构建验证。
 
 ## M8 约定
 

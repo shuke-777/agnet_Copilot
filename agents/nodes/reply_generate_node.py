@@ -1,6 +1,8 @@
 from sqlalchemy.orm import Session
 
 from agents.state import CopilotState
+from schemas.llm import ReplyGenerationResult
+from services.llm_gateway import LLMGateway
 from services.trace_service import record_agent_step
 
 
@@ -51,7 +53,19 @@ def build_reply_draft(state: CopilotState) -> str:
 
 
 def reply_generate_node(db: Session, state: CopilotState) -> CopilotState:
-    state.reply_draft = build_reply_draft(state)
+    fallback_draft = build_reply_draft(state)
+    policy_context = "\n".join(
+        f"- {policy.title}: {policy.content}" for policy in state.retrieved_policies
+    ) or "未召回具体规则"
+    result = LLMGateway.from_environment().complete_structured(
+        system_prompt="你生成简洁、克制的电商客服回复草稿。只返回 JSON：{\"reply_draft\": \"...\"}。不得承诺退款、改物流状态或创建工单。",
+        user_prompt=(
+            f"订单号：{state.order.order_id}\n意图：{state.intent}\n物流异常：{state.is_abnormal}\n"
+            f"物流最新事件：{state.logistics.last_event}\n售后知识：\n{policy_context}"
+        ),
+        response_model=ReplyGenerationResult,
+    )
+    state.reply_draft = result.value.reply_draft if result.success else fallback_draft
     step = record_agent_step(
         db,
         run_id=state.run_id,
@@ -60,6 +74,12 @@ def reply_generate_node(db: Session, state: CopilotState) -> CopilotState:
         status="success",
         input_summary=state.retrieved_policies[0].title if state.retrieved_policies else None,
         output_summary=state.reply_draft,
+        llm_provider=result.call.provider,
+        llm_model=result.call.model,
+        input_tokens=result.call.input_tokens,
+        output_tokens=result.call.output_tokens,
+        fallback_reason=result.call.fallback_reason,
+        duration_override_ms=result.call.duration_ms,
     )
     state.steps.append(step)
     return state

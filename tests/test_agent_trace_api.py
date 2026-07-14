@@ -103,6 +103,21 @@ class TestAgentTraceApi(unittest.TestCase):
         self.assertEqual(body[0]["user_message"], "订单 ORD-1002 到哪里了？")
         self.assertEqual(body[0]["intent"], "logistics_query")
 
+    def test_runs_can_be_filtered_by_run_ticket_or_order_id(self) -> None:
+        with SessionLocal() as db:
+            run = start_agent_run(
+                db,
+                session_id="SESSION-SEARCH-001",
+                user_id="USER-001",
+                user_message="订单 ORD-1001 还没收到",
+            )
+            run.order_id = "ORD-1001"
+            db.commit()
+            run_id = run.run_id
+
+        self.assertEqual(self.client.get(f"/api/runs?q={run_id}").json()[0]["run_id"], run_id)
+        self.assertEqual(self.client.get("/api/runs?q=ORD-1001").json()[0]["run_id"], run_id)
+
     def test_demo_waterfall_run_has_proportional_step_durations(self) -> None:
         response = self.client.post("/api/runs/demo-waterfall")
 
