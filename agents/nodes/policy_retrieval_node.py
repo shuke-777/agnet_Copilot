@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 
 from agents.state import CopilotState
 from services.policy_service import retrieve_policy_candidates
+from services.rag_cache_service import RagCache
 from services.trace_service import record_agent_step
 
 
@@ -17,7 +18,15 @@ def build_policy_query(state: CopilotState) -> str:
 
 def policy_retrieval_node(db: Session, state: CopilotState) -> CopilotState:
     query = build_policy_query(state)
-    state.policy_candidates = retrieve_policy_candidates(query)
+    cache = state.rag_cache or RagCache.from_environment()
+    state.rag_cache = cache
+    cached = cache.get_or_load_policy_candidates(
+        user_message=state.payload.user_message,
+        intent=state.intent,
+        is_abnormal=state.is_abnormal,
+        loader=lambda: retrieve_policy_candidates(query),
+    )
+    state.policy_candidates = cached.value
     step = record_agent_step(
         db,
         run_id=state.run_id,
@@ -26,6 +35,7 @@ def policy_retrieval_node(db: Session, state: CopilotState) -> CopilotState:
         status="success",
         input_summary=query,
         output_summary=f"召回 {len(state.policy_candidates)} 条候选售后知识",
+        cache_hit=cached.cache_hit,
     )
     state.steps.append(step)
     return state

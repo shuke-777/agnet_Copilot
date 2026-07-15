@@ -43,6 +43,7 @@ class TestAgentTraceApi(unittest.TestCase):
                 status="success",
                 input_summary="查询 ORD-1001 物流",
                 output_summary="物流超过 72 小时未更新",
+                cache_hit=True,
             )
             finish_agent_run(db, run_id=run.run_id, status="success")
             run_id = run.run_id
@@ -67,6 +68,7 @@ class TestAgentTraceApi(unittest.TestCase):
         self.assertEqual(steps_body[0]["status"], "success")
         self.assertIsInstance(steps_body[0]["duration_ms"], int)
         self.assertEqual(steps_body[1]["step_name"], "logistics_check")
+        self.assertTrue(steps_body[1]["cache_hit"])
 
     def test_unknown_run_returns_404(self) -> None:
         response = self.client.get("/api/runs/RUN-NOT-FOUND")

@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, foreign, mapped_column, relationship
 
 from models.database import Base
 
@@ -71,6 +71,12 @@ class Ticket(Base):
         "AgentRun",
         back_populates="created_ticket",
         foreign_keys=[source_run_id],
+    )
+    related_runs: Mapped[list["AgentRun"]] = relationship(
+        "AgentRun",
+        primaryjoin="foreign(AgentRun.ticket_id) == Ticket.ticket_id",
+        order_by="AgentRun.created_at",
+        viewonly=True,
     )
     events: Mapped[list["TicketEvent"]] = relationship(
         back_populates="ticket",

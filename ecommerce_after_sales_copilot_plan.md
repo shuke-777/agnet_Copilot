@@ -527,15 +527,26 @@ Pydantic 校验模型结构化输出；超时、有限重试或输出不合格�
 密钥仅从环境变量读取，不写入代码、数据库或 Git
 ```
 
-### M10：Redis 缓存、限流与运营风险榜
+### M10：Redis 性能、缓存与可靠性
 
 ```text
 使用 Redis 实现 POST /api/copilot/analyze 的令牌桶限流，优先按 user_id 限制，并以 IP 作为兜底
 超限返回 HTTP 429 和可重试时间，保护真实 LLM 调用成本
 缓存 Dashboard 统计结果 30-60 秒；建单、工单状态更新和飞书回调后主动失效
-使用 Redis Sorted Set 维护运营风险榜：异常物流承运商风险榜、待处理高优先级工单榜和高频售后问题榜
-使用幂等键或短期锁，防止请求重试导致重复建单、重复飞书通知或重复处理回调
-后续多轮 Copilot 可使用 Redis 按 session_id 保存短期会话上下文
+M10.4 RAG 精确缓存：缓存 query_rewrite、policy_retrieval、policy_rerank；缓存键包含问题哈希、intent、物流异常状态、知识库版本和 Prompt/规则版本
+RAG 命中缓存时仍记录对应 Agent step，并标记 cache_hit，保证 Trace 中的执行链路完整；不缓存完整回复、订单、物流和工单等动态或敏感数据
+M10.5 会话上下文隔离（已完成）：Redis 按 session_id 保存短期多轮上下文，默认 30 分钟、最多 10 条消息；只保存用户/助手文本和最近订单号，同一 session_id 的 user_id 不一致时不读取上下文。接入认证后由 Token 解析 operator_id，未来多商家场景再扩展 tenant_id
+公共售后 SOP 可在同一权限边界内共享缓存；订单、物流、工单等业务数据必须在权限校验后按用户/租户隔离，不能跨用户直接复用
+M10.6 使用 Redis Sorted Set 维护运营风险榜：异常物流承运商风险榜、待处理高优先级工单榜和高频售后问题榜
+M10.7 工单幂等与多 Run 关联（已完成）：同一权限边界内，同一订单的同类售后请求若已有 `todo` 或 `processing` 状态的工单，则复用该工单，不因连续追问、页面重复提交或请求重试重复建单
+首次满足自动建单条件的 Run 创建工单并作为 `source_run_id`；后续复用该工单的 Run 写入 `agent_runs.ticket_id`，保证工单详情可以回看全部相关 Agent Run，Agent 追踪页也能展示同一个工单 ID
+去重依据以业务实体为主：未来为 `tenant_id + order_id + ticket_type + 未关闭状态`，当前 MVP 在未接入租户体系前使用 `order_id + ticket_type + 未关闭状态`；`session_id` 只用于多轮上下文，不作为唯一去重条件
+复用已有工单时写入明确的工单事件，例如 `copilot_followup_analyzed`，记录本轮 `run_id`、用户追问摘要和建议结果；不会重复推送飞书新建工单通知
+复用工单时飞书新建工单通知明确跳过；飞书回调以 `event_id` 作为幂等键，重复事件直接返回首次处理结果，不重复推进状态或写入事件
+M10.8 会话主工单绑定（计划中）：使用 SQLite 持久保存 `session_id + user_id + order_id -> ticket_id` 的活动主工单关系，Redis 只保存短期消息上下文。首次创建或复用催物流工单时建立绑定；同会话、同用户、同订单的物流追问或普通查询 Run 自动关联该 `ticket_id`，但不重复建单或发送飞书通知
+催办表达以 `follow_up_requested` 业务信号记录，不直接把意图强制改为 `logistics_delay`；必须在订单和物流查询后同时满足“已发货、物流异常、明确催办”才创建或复用催物流工单，避免“催发货”被误建物流工单
+同会话识别出不同订单时，接口返回 `session_order_mismatch`，前端要求用户点击“新建咨询”后再继续；不将新订单写入旧工单，也不在旧会话中创建新工单。退款、退货、运费等新的售后意图不自动关联已有物流工单
+会话主工单仅在状态为 `todo` 或 `processing` 时自动关联；已解决工单保留历史关联但不再作为活动主工单。新增 `ticket_association` 返回值区分 `created`、`reused`、`session_linked`、`none` 和 `order_mismatch`
 ```
 
 ### M11：RabbitMQ 异步任务与可靠投递

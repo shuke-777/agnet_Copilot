@@ -129,6 +129,27 @@ export LLM_MODEL='qwen3:8b'
 
 Gateway 仅将真实模型用于意图识别、订单号提取、RAG 查询改写和客服回复草稿。订单/物流查询、异常判断、建单、工单状态流转和飞书通知仍由确定性业务代码执行。模型超时、网络失败、无效 JSON 或结构化结果不合格时，系统会自动降级到确定性逻辑；Run Step 会记录 provider、model、Token 用量和降级原因。
 
+## 可选：启用 Redis
+
+M10 的 Redis 接入是可选的。未配置或未启动 Redis 时，后端仍可正常启动，`GET /health` 会返回 `redis.status = disabled` 或 `unavailable`。后续限流、Dashboard 缓存和运营风险榜会在 Redis 可用时自动启用。
+
+本机已启动 Redis 后，在 `.env` 中配置：
+
+```bash
+REDIS_URL=redis://127.0.0.1:6379/0
+REDIS_CONNECT_TIMEOUT_SECONDS=1
+COPILOT_RATE_LIMIT_CAPACITY=10
+COPILOT_RATE_LIMIT_WINDOW_SECONDS=60
+SESSION_CONTEXT_TTL_SECONDS=1800
+SESSION_CONTEXT_MAX_MESSAGES=10
+```
+
+重启后端，再访问 `http://127.0.0.1:8001/health`；成功连接时会返回 `redis.status = connected`。无需在当前阶段修改 Docker Compose。
+
+Redis 连通后，`POST /api/copilot/analyze` 默认按 `user_id` 采用令牌桶限制为每 60 秒 10 次；请求没有 `user_id` 时按客户端 IP 兜底。超限时接口返回 HTTP `429`、`Retry-After` 和可重试秒数，React 工作台会直接提示等待时间。Redis 未配置或不可用时，限流自动降级放行，避免影响本地开发。
+
+Redis 也会按 `session_id` 保存 Copilot 短期上下文，默认保留 30 分钟、最多 10 条消息。上下文只包含用户/助手文本和最近识别到的订单号；同一 `session_id` 但 `user_id` 不一致时不会读取已有上下文。订单、物流、工单等完整业务对象仍只从数据库按业务权限读取，不进入会话缓存。Redis 不可用时，系统继续使用前端传入的 `history` 和数据库最近 Run 作为订单号识别的降级来源。
+
 ## 演示流程
 
 ### 1. 提交异常物流问题

@@ -27,6 +27,17 @@ function makeSessionId() {
   return `WEB-${Date.now()}`;
 }
 
+function getAnalysisErrorMessage(error: unknown) {
+  const response = (error as {
+    response?: { status?: number; data?: { detail?: { code?: string; retry_after_seconds?: number } } };
+  }).response;
+  const retryAfterSeconds = response?.data?.detail?.retry_after_seconds;
+  if (response?.status === 429 && response.data?.detail?.code === "copilot_rate_limited" && retryAfterSeconds) {
+    return `请求过于频繁，请在 ${retryAfterSeconds} 秒后重试。`;
+  }
+  return "分析请求未完成，请确认后端服务已启动后重试。";
+}
+
 export function CopilotAnalysisProvider({ children }: { children: React.ReactNode }) {
   const [sessionId, setSessionId] = useState(makeSessionId);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
@@ -57,8 +68,8 @@ export function CopilotAnalysisProvider({ children }: { children: React.ReactNod
       setResult(analysis);
       setDraft("");
       setRefreshToken((current) => current + 1);
-    } catch {
-      setErrorMessage("分析请求未完成，请确认后端服务已启动后重试。");
+    } catch (error) {
+      setErrorMessage(getAnalysisErrorMessage(error));
     } finally {
       setIsAnalyzing(false);
     }

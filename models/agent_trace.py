@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.business import utc_now
@@ -15,6 +15,7 @@ class AgentRun(Base):
     user_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     user_message: Mapped[str] = mapped_column(Text)
     order_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    ticket_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     intent: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(32), default="running", index=True)
     total_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -33,10 +34,6 @@ class AgentRun(Base):
         uselist=False,
         foreign_keys="Ticket.source_run_id",
     )
-
-    @property
-    def ticket_id(self) -> str | None:
-        return self.created_ticket.ticket_id if self.created_ticket is not None else None
 
 
 class AgentStep(Base):
@@ -58,5 +55,6 @@ class AgentStep(Base):
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     fallback_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cache_hit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     run: Mapped[AgentRun] = relationship(back_populates="steps")

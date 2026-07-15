@@ -24,6 +24,7 @@ class CopilotAnalyzeResponse(BaseModel):
     is_abnormal: bool
     reply_draft: str
     ticket_created: bool
+    ticket_reused: bool
     ticket_id: str | None
     feishu_status: str
     policy_sources: list[PolicySource] = Field(default_factory=list)

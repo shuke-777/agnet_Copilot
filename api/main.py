@@ -15,6 +15,7 @@ from api.copilot import router as copilot_router
 from api.dashboard import router as dashboard_router
 from api.feishu import router as feishu_router
 from services.bootstrap import bootstrap_database
+from services.redis_service import RedisService
 
 
 APP_NAME = "ecommerce-after-sales-copilot"
@@ -38,11 +39,13 @@ app.include_router(feishu_router)
 
 
 @app.get("/health")
-def health_check() -> dict[str, str]:
+def health_check() -> dict[str, str | dict[str, str]]:
+    redis_service = RedisService.from_environment()
     return {
         "status": "ok",
         "service": APP_NAME,
         "version": APP_VERSION,
+        "redis": redis_service.status.as_dict(),
     }
 if __name__ == '__main__':
     uvicorn.run('api.main:app', host='0.0.0.0', port=8001,reload=True)

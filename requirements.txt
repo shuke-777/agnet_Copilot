@@ -6,5 +6,6 @@ langgraph
 pydantic
 python-dotenv
 pytest
+redis
 sqlalchemy
 uvicorn

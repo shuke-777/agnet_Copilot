@@ -22,6 +22,7 @@ class AgentStepRead(BaseModel):
     input_tokens: int | None
     output_tokens: int | None
     fallback_reason: str | None
+    cache_hit: bool
 
 
 class AgentRunRead(BaseModel):

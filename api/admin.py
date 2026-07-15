@@ -14,6 +14,7 @@ from services.dashboard_service import (
     get_dashboard_overview,
     get_ticket_stats,
 )
+from services.dashboard_cache_service import invalidate_dashboard_cache
 from services.ticket_transition_service import TicketTransitionError, apply_ticket_transition
 
 
@@ -412,6 +413,7 @@ def perform_ticket_action(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     db.commit()
+    invalidate_dashboard_cache()
     return RedirectResponse(url=f"/admin/tickets/{ticket.ticket_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 

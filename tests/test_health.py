@@ -24,5 +24,9 @@ class TestHealthCheck(unittest.TestCase):
                 "status": "ok",
                 "service": APP_NAME,
                 "version": APP_VERSION,
+                "redis": {
+                    "status": "disabled",
+                    "detail": "REDIS_URL is not configured",
+                },
             },
         )

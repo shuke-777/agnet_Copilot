@@ -82,6 +82,27 @@ describe("App", () => {
     expect(screen.getByText("物流超过 72 小时未更新处理 SOP")).toBeInTheDocument();
   });
 
+  it("shows the retry time when Copilot analysis is rate limited", async () => {
+    const user = userEvent.setup();
+    mockedAxios.post.mockRejectedValue({
+      response: {
+        status: 429,
+        data: {
+          detail: {
+            code: "copilot_rate_limited",
+            retry_after_seconds: 17,
+          },
+        },
+      },
+    });
+
+    render(<MemoryRouter initialEntries={["/workspace"]}><App /></MemoryRouter>);
+    await user.type(screen.getByRole("textbox", { name: "用户问题" }), "订单 ORD-1001 怎么还没收到？");
+    await user.click(screen.getByRole("button", { name: /开始分析/ }));
+
+    expect(await screen.findByText("请求过于频繁，请在 17 秒后重试。")).toBeInTheDocument();
+  });
+
   it("keeps one session across turns and lets the agent start a new consultation", async () => {
     const user = userEvent.setup();
     mockedAxios.post.mockResolvedValue({

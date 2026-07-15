@@ -8,6 +8,7 @@ from models.agent_trace import AgentStep
 from models.business import Logistics, Order
 from schemas.copilot import CopilotAnalyzeRequest
 from schemas.policy import PolicySource
+from services.session_memory_service import SessionContext
 
 
 @dataclass
@@ -15,6 +16,7 @@ class CopilotState:
     payload: CopilotAnalyzeRequest
     run_id: str
     db: Any = None
+    session_context: SessionContext = field(default_factory=SessionContext)
     intent: str | None = None
     order_id: str | None = None
     order: Order | None = None
@@ -25,5 +27,8 @@ class CopilotState:
     retrieved_policies: list[PolicySource] = field(default_factory=list)
     reply_draft: str | None = None
     ticket_id: str | None = None
+    ticket_created: bool = False
+    ticket_reused: bool = False
     feishu_status: str = "skipped"
+    rag_cache: Any = None
     steps: list[AgentStep] = field(default_factory=list)

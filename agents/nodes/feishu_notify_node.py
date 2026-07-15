@@ -21,6 +21,20 @@ def feishu_notify_node(db: Session, state: CopilotState) -> CopilotState:
         state.steps.append(step)
         return state
 
+    if not state.ticket_created:
+        state.feishu_status = "skipped"
+        step = record_agent_step(
+            db,
+            run_id=state.run_id,
+            step_name="feishu_notify",
+            step_type="webhook",
+            status="skipped",
+            input_summary=state.ticket_id,
+            output_summary="复用已有未关闭工单，跳过飞书新建工单通知",
+        )
+        state.steps.append(step)
+        return state
+
     ticket = db.get(Ticket, state.ticket_id)
     if ticket is None or state.order is None or state.logistics is None:
         state.feishu_status = "failed"

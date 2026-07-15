@@ -79,6 +79,16 @@ class TicketActionRequest(BaseModel):
     operator: str = Field(min_length=1, max_length=64)
 
 
+class TicketRelatedRunRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    run_id: str
+    intent: str | None
+    user_message: str
+    status: str
+    created_at: datetime
+
+
 class TicketRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -97,6 +107,7 @@ class TicketRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     events: list[TicketEventRead] = []
+    related_runs: list[TicketRelatedRunRead] = []
 
 
 class FeishuCallbackRequest(BaseModel):

@@ -11,6 +11,8 @@ TEST_DATABASE_PATH = PROJECT_ROOT / "data" / "test.db"
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{TEST_DATABASE_PATH}")
 # Tests must never use a developer's locally configured paid or local model service.
 os.environ["LLM_PROVIDER"] = "disabled"
+# Tests must not require a locally running Redis instance.
+os.environ["REDIS_URL"] = ""
 
 
 @pytest.fixture(autouse=True)

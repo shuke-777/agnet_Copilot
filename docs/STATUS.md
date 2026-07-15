@@ -144,10 +144,38 @@
   - Copilot 工作台支持同一 `session_id` 的连续多轮咨询；当前消息缺少订单号时，后端可从请求历史或该会话最近 Run 回退识别订单。
   - 新增显性“新建咨询”按钮，仅清空当前标签页会话、草稿和结果，不删除历史 Run 或工单。
   - 分析任务、结果和错误状态提升到路由外 Context；切换页面后任务继续执行，其他页面显示轻量状态提示，完成后工单与 Run 列表自动刷新。
+- M10.1 Redis 基础接入已完成：
+  - 新增可选 Redis 连接层和 `REDIS_URL` / `REDIS_CONNECT_TIMEOUT_SECONDS` 配置。
+  - 未配置 Redis 时服务保持可用并返回 `disabled`；连接失败返回 `unavailable`，不会阻塞本地开发。
+  - `GET /health` 已展示 Redis 状态，为后续限流、缓存和风险榜提供可观测入口。
+- M10.2 Copilot 令牌桶限流已完成：
+  - `POST /api/copilot/analyze` 在 Redis 可用时按 `user_id` 限制，缺失用户身份时按客户端 IP 兜底。
+  - 默认额度为每 60 秒 10 次，可通过环境变量调整；Redis 不可用时自动降级放行。
+  - 超限返回 HTTP `429`、`Retry-After` 和重试秒数；React 工作台会展示可再次发送的等待时间。
+- M10.3 Dashboard Redis 缓存与主动失效已完成：
+  - `GET /api/dashboard/overview`、`/ticket-stats`、`/agent-performance` 使用 Redis 缓存聚合结果，默认 TTL 为 60 秒，可通过 `DASHBOARD_CACHE_TTL_SECONDS` 调整。
+  - Redis 未配置、连接失败、读取或写入异常时，接口自动回退 SQLite 实时统计，不影响看板可用性。
+  - 工单创建、更新、人工状态操作、Copilot Run 完成、飞书回调和示例 Trace 创建成功后，统一清理三组 Dashboard 缓存，避免统计结果停留在旧状态。
+- M10.4 RAG 精确缓存已完成：
+  - 使用 Redis 缓存 `query_rewrite`、`policy_retrieval`、`policy_rerank` 三个稳定中间结果，默认 TTL 为 300 秒，可通过 `RAG_CACHE_TTL_SECONDS` 调整。
+  - 缓存键仅使用用户问题 SHA-256 哈希，并同时带上意图、物流异常状态、知识库版本、规则版本和 Prompt 版本；版本变更会自然隔离旧缓存。
+  - Redis 未配置、连接失败、读取失败或缓存内容无效时，自动执行既有 RAG 链路；不缓存订单、物流、工单或完整客服回复。
+  - `agent_steps` 增加 `cache_hit` 字段，缓存命中仍记录完整 Step；Run 详情页会显示“RAG 缓存命中”。
+- M10.7 工单幂等与多 Run 关联已完成：
+  - 自动建单前按 `order_id + ticket_type + todo/processing` 查询未关闭工单；命中时复用工单，而非为连续追问或页面重复提交再次建单。
+  - `tickets.source_run_id` 保留首次建单来源；每次创建或复用工单的 Run 均写入 `agent_runs.ticket_id`，工单中心与 Agent 追踪可使用同一个工单 ID 对齐查看。
+  - 复用时写入 `copilot_followup_analyzed` 工单事件，记录本轮 Run、用户问题与建议；API 返回 `ticket_created` / `ticket_reused` 区分结果，工作台展示“已复用”。
+  - 复用工单不重复发送飞书新建通知；飞书回调按 `event_id` 幂等，重复事件返回首次处理结果，不重复推进状态。
+- M10.5 会话上下文隔离已完成：
+  - Redis 按 `session_id` 保存短期上下文，默认 TTL 为 30 分钟、最多保留 10 条消息，均可通过环境变量调整。
+  - 会话只保存用户/助手文本和最近订单号；同一 `session_id` 的 `user_id` 不一致时不读取上下文，避免演示环境下的会话串扰。
+  - 当前消息和前端 `history` 都缺少订单号时，LangGraph 会优先从 Redis 会话上下文补全；Redis 未配置、不可用或内容失效时，继续回退到数据库最近 Run。
+  - 不缓存订单、物流、工单等完整业务对象；未来接入认证后将由 Token 解析身份，并在多商家场景增加 `tenant_id` 隔离。
 
 ## 下一步
 
-- M10：Redis 缓存、按 `user_id` 的令牌桶限流、Dashboard 缓存失效与运营风险榜。
+- M10.8：会话主工单绑定。用 SQLite 持久保存会话与活动工单关系；同用户、同订单的后续 Run 自动关联同一工单。催办判断改为订单/物流查询后的 `follow_up_requested` 业务信号，跨订单要求前端新建咨询，退款/退货/运费等新意图不污染物流工单。
+- M10.6：运营风险榜。完成 M10.8 后，使用 Redis Sorted Set 维护异常物流承运商风险、待处理高优先级工单和高频售后问题。
 - 最终交付：完成前后端 Docker Compose 联合启动、浏览器验收和镜像构建验证。
 
 ## M8 约定

@@ -17,6 +17,7 @@ from agents.nodes.reply_generate_node import reply_generate_node
 from agents.nodes.ticket_create_node import ticket_create_node
 from agents.state import CopilotState
 from schemas.copilot import CopilotAnalyzeRequest
+from services.session_memory_service import SessionContext
 
 
 WorkflowNode = Callable[[Session, CopilotState], CopilotState]
@@ -78,6 +79,14 @@ def run_copilot_workflow(
     db: Session,
     payload: CopilotAnalyzeRequest,
     run_id: str,
+    session_context: SessionContext | None = None,
 ) -> CopilotState:
     graph = build_copilot_graph()
-    return graph.invoke(CopilotState(payload=payload, run_id=run_id, db=db))
+    return graph.invoke(
+        CopilotState(
+            payload=payload,
+            run_id=run_id,
+            db=db,
+            session_context=session_context or SessionContext(),
+        )
+    )

@@ -120,8 +120,10 @@ function WorkspacePage() {
         <article className="work-panel">
           <Text className="panel-eyebrow">人工 Checkpoint</Text>
           <div className="metric-row">
-            <strong>{result?.ticket_created ? "1" : "0"}</strong>
-            <Text type="secondary">{result?.ticket_created ? "已创建待处理工单" : "等待人工确认"}</Text>
+            <strong>{result?.ticket_id ? "1" : "0"}</strong>
+            <Text type="secondary">
+              {result?.ticket_created ? "已创建待处理工单" : result?.ticket_reused ? "已关联已有待处理工单" : "等待人工确认"}
+            </Text>
           </div>
           <Text type="secondary">当前会话：{sessionId}。系统只给出建议与创建结果，状态推进仍由人工确认。</Text>
         </article>
@@ -160,7 +162,7 @@ function WorkspacePage() {
             <Descriptions.Item label="识别意图">{result.intent}</Descriptions.Item>
             <Descriptions.Item label="订单号">{result.order_id || "未识别"}</Descriptions.Item>
             <Descriptions.Item label="工单结果">
-              {result.ticket_created && result.ticket_id ? <Link to={`/tickets/${result.ticket_id}`}>{result.ticket_id}</Link> : "未创建工单"}
+              {result.ticket_id ? <Link to={`/tickets/${result.ticket_id}`}>{result.ticket_reused ? `${result.ticket_id}（已复用）` : result.ticket_id}</Link> : "未创建工单"}
             </Descriptions.Item>
             <Descriptions.Item label="飞书通知">{result.feishu_status}</Descriptions.Item>
           </Descriptions>
@@ -199,6 +201,7 @@ function WorkspacePage() {
               <Link to={`/runs/${result.run_id}`}><Text code>{result.run_id}</Text></Link>
             </Space>
             {result.ticket_created && <Tag color="blue">已创建催物流工单</Tag>}
+            {result.ticket_reused && <Tag color="cyan">已关联已有工单</Tag>}
           </div>
         </div>
       )}
@@ -289,6 +292,7 @@ function TraceWaterfall({
             >
               <span className={`trace-legend-swatch ${traceSegmentClass(step)}`} />
               <span>{step.step_name}</span>
+              {step.cache_hit && <Tag color="cyan">缓存命中</Tag>}
               <span className="trace-legend-duration">{formatDuration(step.duration_ms)}</span>
             </button>
           );
@@ -472,6 +476,22 @@ function TicketDetailPage() {
         </article>
       </div>
       <article className="data-panel timeline-panel">
+        <Text className="panel-eyebrow">关联 Agent Run</Text>
+        {(ticket.related_runs ?? []).length > 0 ? (
+          <Space wrap size={[8, 8]}>
+            {ticket.related_runs.map((run) => (
+              <Link key={run.run_id} to={`/runs/${run.run_id}`}>
+                <Tag color={run.run_id === ticket.source_run_id ? "blue" : "cyan"}>
+                  {run.run_id === ticket.source_run_id ? "来源 " : "追加 "}{run.run_id}
+                </Tag>
+              </Link>
+            ))}
+          </Space>
+        ) : (
+          <Text type="secondary">暂无关联 Agent Run。</Text>
+        )}
+      </article>
+      <article className="data-panel timeline-panel">
         <Text className="panel-eyebrow">工单事件</Text>
         <Timeline
           items={ticket.events.map((event) => ({
@@ -624,6 +644,7 @@ function RunDetailPage() {
                 <strong>{selectedStep.step_name}</strong>
                 <Tag>{selectedStep.step_type}</Tag>
                 <StatusTag value={selectedStep.status} />
+                {selectedStep.cache_hit && <Tag color="cyan">RAG 缓存命中</Tag>}
                 <Text type="secondary">{formatDuration(selectedStep.duration_ms)}</Text>
               </Space>
               <Text type="secondary">

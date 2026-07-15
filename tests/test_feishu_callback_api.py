@@ -75,6 +75,18 @@ class TestFeishuCallbackApi(unittest.TestCase):
         self.assertEqual(reopen_response.status_code, 200)
         self.assertEqual(reopen_response.json()["ticket"]["status"], "processing")
 
+    def test_callback_is_idempotent_for_the_same_feishu_event_id(self) -> None:
+        first_response = self.callback("claim", "FEISHU-EVENT-IDEMPOTENT-001")
+        second_response = self.callback("claim", "FEISHU-EVENT-IDEMPOTENT-001")
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_response.json()["ticket"]["status"], "processing")
+        self.assertEqual(second_response.json()["ticket_event"]["event_id"], first_response.json()["ticket_event"]["event_id"])
+
+        ticket = self.client.get(f"/api/tickets/{self.ticket_id}").json()
+        self.assertEqual(len(ticket["events"]), 1)
+
     def test_callback_rejects_invalid_transition(self) -> None:
         response = self.callback("resolve", "FEISHU-EVENT-005")
 

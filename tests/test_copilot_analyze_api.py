@@ -10,6 +10,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from fastapi.testclient import TestClient
 
 from api.main import app
+from models.business import Ticket
+from models.database import SessionLocal
 
 
 class TestCopilotAnalyzeApi(unittest.TestCase):
@@ -169,6 +171,78 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "Order id not found in user message")
 
+    def test_analyze_returns_429_when_redis_rate_limiter_rejects_request(self) -> None:
+        class RejectingRedisClient:
+            def __init__(self) -> None:
+                self.eval_calls: list[tuple[object, ...]] = []
+
+            def ping(self) -> bool:
+                return True
+
+            def eval(self, *args: object) -> list[int]:
+                self.eval_calls.append(args)
+                return [0, 0, 17]
+
+        redis_client = RejectingRedisClient()
+        with patch.dict(
+            "os.environ",
+            {
+                "REDIS_URL": "redis://127.0.0.1:6379/0",
+                "COPILOT_RATE_LIMIT_CAPACITY": "10",
+                "COPILOT_RATE_LIMIT_WINDOW_SECONDS": "60",
+            },
+        ), patch("redis.Redis.from_url", return_value=redis_client):
+            response = self.client.post(
+                "/api/copilot/analyze",
+                json={
+                    "session_id": "SESSION-COPILOT-RATE-LIMIT-001",
+                    "user_id": "USER-RATE-LIMIT-001",
+                    "user_message": "订单 ORD-1001 怎么还没收到？",
+                },
+            )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.headers["retry-after"], "17")
+        self.assertEqual(
+            response.json(),
+            {
+                "detail": {
+                    "code": "copilot_rate_limited",
+                    "message": "Copilot analysis rate limit exceeded",
+                    "retry_after_seconds": 17,
+                },
+            },
+        )
+        self.assertEqual(redis_client.eval_calls[0][2], "rate_limit:copilot:USER-RATE-LIMIT-001")
+
+    def test_analyze_uses_client_ip_when_rate_limiter_has_no_user_id(self) -> None:
+        class RejectingRedisClient:
+            def __init__(self) -> None:
+                self.eval_calls: list[tuple[object, ...]] = []
+
+            def ping(self) -> bool:
+                return True
+
+            def eval(self, *args: object) -> list[int]:
+                self.eval_calls.append(args)
+                return [0, 0, 1]
+
+        redis_client = RejectingRedisClient()
+        with patch.dict("os.environ", {"REDIS_URL": "redis://127.0.0.1:6379/0"}), patch(
+            "redis.Redis.from_url",
+            return_value=redis_client,
+        ):
+            response = self.client.post(
+                "/api/copilot/analyze",
+                json={
+                    "session_id": "SESSION-COPILOT-IP-LIMIT-001",
+                    "user_message": "订单 ORD-1001 怎么还没收到？",
+                },
+            )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(redis_client.eval_calls[0][2], "rate_limit:copilot:ip:testclient")
+
     def test_analyze_uses_recent_session_history_when_message_has_no_order_id(self) -> None:
         session_id = "SESSION-COPILOT-CONTEXT-001"
         first_response = self.client.post(
@@ -192,3 +266,47 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
 
         self.assertEqual(second_response.status_code, 200)
         self.assertEqual(second_response.json()["order_id"], "ORD-1001")
+
+    def test_analyze_reuses_open_ticket_for_same_order_and_links_followup_run(self) -> None:
+        payload = {
+            "session_id": "SESSION-COPILOT-TICKET-REUSE-001",
+            "user_id": "USER-001",
+            "user_message": "我的订单 ORD-1001 一直没收到，帮我催物流。",
+        }
+
+        with patch.dict("os.environ", {"FEISHU_WEBHOOK_URL": ""}):
+            first_response = self.client.post("/api/copilot/analyze", json=payload)
+            second_response = self.client.post(
+                "/api/copilot/analyze",
+                json={**payload, "user_message": "请继续跟进 ORD-1001 的物流异常。"},
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        first_body = first_response.json()
+        second_body = second_response.json()
+        self.assertTrue(first_body["ticket_created"])
+        self.assertFalse(first_body["ticket_reused"])
+        self.assertFalse(second_body["ticket_created"])
+        self.assertTrue(second_body["ticket_reused"])
+        self.assertEqual(second_body["ticket_id"], first_body["ticket_id"])
+        self.assertEqual(second_body["feishu_status"], "skipped")
+
+        with SessionLocal() as db:
+            tickets = list(db.query(Ticket).filter(Ticket.order_id == "ORD-1001"))
+        self.assertEqual(len(tickets), 1)
+
+        ticket_response = self.client.get(f"/api/tickets/{first_body['ticket_id']}")
+        self.assertEqual(ticket_response.status_code, 200)
+        ticket_body = ticket_response.json()
+        events = ticket_body["events"]
+        self.assertEqual(events[-1]["event_type"], "copilot_followup_analyzed")
+        self.assertIn(second_body["run_id"], events[-1]["content"])
+        self.assertEqual(
+            {run["run_id"] for run in ticket_body["related_runs"]},
+            {first_body["run_id"], second_body["run_id"]},
+        )
+
+        followup_run = self.client.get(f"/api/runs/{second_body['run_id']}")
+        self.assertEqual(followup_run.status_code, 200)
+        self.assertEqual(followup_run.json()["ticket_id"], first_body["ticket_id"])

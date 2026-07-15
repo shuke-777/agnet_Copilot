@@ -31,6 +31,7 @@ def migrate_agent_step_columns() -> None:
         "input_tokens": "INTEGER",
         "output_tokens": "INTEGER",
         "fallback_reason": "TEXT",
+        "cache_hit": "BOOLEAN NOT NULL DEFAULT 0",
     }
     with engine.begin() as connection:
         for column_name, column_type in columns.items():
@@ -44,7 +45,10 @@ def migrate_m8_6_columns() -> None:
     tables = set(inspector.get_table_names())
     additions = {
         "tickets": {"source_run_id": "VARCHAR(64)"},
-        "agent_runs": {"order_id": "VARCHAR(64)"},
+        "agent_runs": {
+            "order_id": "VARCHAR(64)",
+            "ticket_id": "VARCHAR(64)",
+        },
     }
     with engine.begin() as connection:
         for table_name, columns in additions.items():
@@ -57,6 +61,7 @@ def migrate_m8_6_columns() -> None:
 
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_tickets_source_run_id ON tickets (source_run_id)"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_runs_order_id ON agent_runs (order_id)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_runs_ticket_id ON agent_runs (ticket_id)"))
         # Historical ticket_create steps already contain the generated ticket ID.
         connection.execute(
             text(
@@ -66,6 +71,15 @@ def migrate_m8_6_columns() -> None:
                 "AND agent_steps.output_summary = tickets.ticket_id "
                 "ORDER BY agent_steps.start_time LIMIT 1"
                 ") WHERE source_run_id IS NULL"
+            )
+        )
+        connection.execute(
+            text(
+                "UPDATE agent_runs SET ticket_id = ("
+                "SELECT tickets.ticket_id FROM tickets "
+                "WHERE tickets.source_run_id = agent_runs.run_id "
+                "LIMIT 1"
+                ") WHERE ticket_id IS NULL"
             )
         )
 

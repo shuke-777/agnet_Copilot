@@ -30,6 +30,7 @@ def order_extract_node(db: Session, state: CopilotState) -> CopilotState:
     state.order_id = result.value.order_id if result.success else extract_order_id(state.payload.user_message)
     if state.order_id is None:
         history_messages = [message.content for message in reversed(state.payload.history) if message.role == "user"]
+        memory_messages = [message.content for message in reversed(state.session_context.messages) if message.role == "user"]
         prior_session_messages = list(
             db.scalars(
                 select(AgentRun.user_message)
@@ -38,10 +39,12 @@ def order_extract_node(db: Session, state: CopilotState) -> CopilotState:
                 .limit(5)
             )
         )
-        for message in [*history_messages, *prior_session_messages]:
+        for message in [*history_messages, *memory_messages, *prior_session_messages]:
             state.order_id = extract_order_id(message)
             if state.order_id is not None:
                 break
+    if state.order_id is None:
+        state.order_id = state.session_context.order_id
     if state.order_id is None:
         step = record_agent_step(
             db,

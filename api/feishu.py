@@ -1,9 +1,11 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.business import get_ticket_or_404
+from models.business import TicketEvent
 from models.feishu_event import FeishuEvent
 from models.database import get_db
 from schemas.business import (
@@ -14,6 +16,7 @@ from schemas.business import (
     TicketRead,
 )
 from services.ticket_transition_service import TicketTransitionError, apply_ticket_transition
+from services.dashboard_cache_service import invalidate_dashboard_cache
 
 
 router = APIRouter(prefix="/api/feishu", tags=["feishu"])
@@ -24,6 +27,42 @@ def handle_callback(
     payload: FeishuCallbackRequest,
     db: Session = Depends(get_db),
 ) -> dict:
+    existing_event = db.get(FeishuEvent, payload.event_id)
+    if existing_event is not None:
+        if (
+            existing_event.ticket_id != payload.ticket_id
+            or existing_event.action != payload.action
+            or existing_event.operator != payload.operator
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Feishu event id conflicts with an existing callback",
+            )
+
+        ticket = get_ticket_or_404(db, existing_event.ticket_id)
+        ticket_event = db.scalar(
+            select(TicketEvent)
+            .where(
+                TicketEvent.ticket_id == existing_event.ticket_id,
+                TicketEvent.event_type == "feishu_status_changed",
+                TicketEvent.operator == existing_event.operator,
+                TicketEvent.from_status == existing_event.from_status,
+                TicketEvent.to_status == existing_event.to_status,
+                TicketEvent.created_at == existing_event.processed_at,
+            )
+            .order_by(TicketEvent.created_at.desc())
+        )
+        if ticket_event is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Existing Feishu callback is missing its ticket event",
+            )
+        return {
+            "ticket": ticket,
+            "ticket_event": ticket_event,
+            "feishu_event": existing_event,
+        }
+
     ticket = get_ticket_or_404(db, payload.ticket_id)
     try:
         ticket_event = apply_ticket_transition(
@@ -56,6 +95,7 @@ def handle_callback(
     db.commit()
     db.refresh(ticket_event)
     db.refresh(feishu_event)
+    invalidate_dashboard_cache()
 
     return {
         "ticket": get_ticket_or_404(db, ticket.ticket_id),

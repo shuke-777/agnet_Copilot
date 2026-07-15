@@ -51,6 +51,7 @@ def record_agent_step(
     input_tokens: int | None = None,
     output_tokens: int | None = None,
     fallback_reason: str | None = None,
+    cache_hit: bool = False,
     duration_override_ms: int | None = None,
 ) -> AgentStep:
     start_time = utc_now()
@@ -72,6 +73,7 @@ def record_agent_step(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         fallback_reason=fallback_reason,
+        cache_hit=cache_hit,
     )
     db.add(step)
     db.commit()

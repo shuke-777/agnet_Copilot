@@ -17,6 +17,7 @@ from schemas.business import (
     TicketUpdate,
 )
 from services.ticket_transition_service import TicketTransitionError, apply_ticket_transition
+from services.dashboard_cache_service import invalidate_dashboard_cache
 
 
 router = APIRouter(prefix="/api", tags=["business"])
@@ -29,7 +30,11 @@ def make_id(prefix: str) -> str:
 def get_ticket_or_404(db: Session, ticket_id: str) -> Ticket:
     ticket = db.scalar(
         select(Ticket)
-        .options(selectinload(Ticket.events), selectinload(Ticket.source_run))
+        .options(
+            selectinload(Ticket.events),
+            selectinload(Ticket.source_run),
+            selectinload(Ticket.related_runs),
+        )
         .where(Ticket.ticket_id == ticket_id)
     )
     if ticket is None:
@@ -73,12 +78,17 @@ def create_ticket(payload: TicketCreate, db: Session = Depends(get_db)) -> Ticke
     db.add(ticket)
     db.commit()
     db.refresh(ticket)
+    invalidate_dashboard_cache()
     return get_ticket_or_404(db, ticket.ticket_id)
 
 
 @router.get("/tickets", response_model=list[TicketRead])
 def list_tickets(q: str | None = None, db: Session = Depends(get_db)) -> list[Ticket]:
-    statement = select(Ticket).options(selectinload(Ticket.events), selectinload(Ticket.source_run))
+    statement = select(Ticket).options(
+        selectinload(Ticket.events),
+        selectinload(Ticket.source_run),
+        selectinload(Ticket.related_runs),
+    )
     if q and q.strip():
         query = q.strip().upper()
         statement = statement.where(
@@ -109,6 +119,7 @@ def update_ticket(ticket_id: str, payload: TicketUpdate, db: Session = Depends(g
     ticket.updated_at = utc_now()
     db.commit()
     db.refresh(ticket)
+    invalidate_dashboard_cache()
     return get_ticket_or_404(db, ticket.ticket_id)
 
 
@@ -132,6 +143,7 @@ def apply_ticket_action(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     db.commit()
+    invalidate_dashboard_cache()
     return get_ticket_or_404(db, ticket.ticket_id)
 
 
@@ -159,4 +171,5 @@ def create_ticket_event(
     ticket.updated_at = utc_now()
     db.commit()
     db.refresh(event)
+    invalidate_dashboard_cache()
     return event

@@ -12,6 +12,9 @@ from schemas.copilot import CopilotAnalyzeRequest
 from services.trace_service import finish_agent_run, start_agent_run
 from agents.state import CopilotState
 from agents.workflow import build_copilot_graph, run_copilot_workflow
+from services.redis_service import RedisService, RedisStatus
+from services.session_memory_service import SessionContext
+from schemas.copilot import CopilotHistoryMessage
 
 
 class TestCopilotWorkflow(unittest.TestCase):
@@ -87,3 +90,90 @@ class TestCopilotWorkflow(unittest.TestCase):
             self.assertEqual(state.feishu_status, "disabled")
             self.assertGreaterEqual(len(state.retrieved_policies), 1)
             self.assertEqual(state.steps[-1].step_name, "feishu_notify")
+
+    def test_workflow_uses_redis_session_context_when_followup_has_no_order_id(self) -> None:
+        payload = CopilotAnalyzeRequest(
+            session_id="SESSION-REDIS-CONTEXT-001",
+            user_id="USER-001",
+            user_message="请继续帮我催一下物流。",
+        )
+        session_context = SessionContext(
+            messages=[CopilotHistoryMessage(role="user", content="订单 ORD-1001 一直没收到。")],
+            order_id="ORD-1001",
+        )
+
+        with patch.dict("os.environ", {"FEISHU_WEBHOOK_URL": ""}), SessionLocal() as db:
+            run = start_agent_run(
+                db,
+                session_id=payload.session_id,
+                user_id=payload.user_id,
+                user_message=payload.user_message,
+            )
+            state = run_copilot_workflow(
+                db=db,
+                payload=payload,
+                run_id=run.run_id,
+                session_context=session_context,
+            )
+
+        self.assertEqual(state.order_id, "ORD-1001")
+
+    def test_second_run_records_rag_cache_hits(self) -> None:
+        from services.rag_cache_service import RagCache
+
+        class FakeRedisClient:
+            def __init__(self) -> None:
+                self.values: dict[str, str] = {}
+
+            def get(self, key: str) -> str | None:
+                return self.values.get(key)
+
+            def set(self, key: str, value: str, ex: int | None = None) -> bool:
+                self.values[key] = value
+                return True
+
+        cache = RagCache(
+            redis_service=RedisService(FakeRedisClient(), RedisStatus("connected", "available")),
+            ttl_seconds=300,
+        )
+        payload = CopilotAnalyzeRequest(
+            session_id="SESSION-RAG-CACHE-001",
+            user_id="USER-001",
+            user_message="我的订单 ORD-1001 怎么还没收到？",
+        )
+
+        with patch("services.rag_cache_service.RagCache.from_environment", return_value=cache), patch.dict(
+            "os.environ", {"FEISHU_WEBHOOK_URL": ""}
+        ), SessionLocal() as db:
+            first_run = start_agent_run(db, session_id=payload.session_id, user_id=payload.user_id, user_message=payload.user_message)
+            run_copilot_workflow(db=db, payload=payload, run_id=first_run.run_id)
+            second_run = start_agent_run(db, session_id=payload.session_id, user_id=payload.user_id, user_message=payload.user_message)
+            second_state = run_copilot_workflow(db=db, payload=payload, run_id=second_run.run_id)
+            second_rag_cache_hits = [
+                step.cache_hit
+                for step in second_state.steps
+                if step.step_name in {"query_rewrite", "policy_retrieval", "policy_rerank"}
+            ]
+
+        self.assertEqual(second_rag_cache_hits, [True, True, True])
+
+    def test_reused_ticket_does_not_send_a_second_feishu_notification(self) -> None:
+        payload = CopilotAnalyzeRequest(
+            session_id="SESSION-WORKFLOW-TICKET-REUSE-001",
+            user_id="USER-001",
+            user_message="订单 ORD-1001 一直没收到，帮我催物流。",
+        )
+
+        with patch("agents.nodes.feishu_notify_node.send_feishu_text_notification") as send_notification, SessionLocal() as db:
+            send_notification.return_value.status = "success"
+            send_notification.return_value.message = "Feishu webhook sent"
+            first_run = start_agent_run(db, session_id=payload.session_id, user_id=payload.user_id, user_message=payload.user_message)
+            first_state = run_copilot_workflow(db=db, payload=payload, run_id=first_run.run_id)
+            second_run = start_agent_run(db, session_id=payload.session_id, user_id=payload.user_id, user_message=payload.user_message)
+            second_state = run_copilot_workflow(db=db, payload=payload, run_id=second_run.run_id)
+
+        self.assertTrue(first_state.ticket_created)
+        self.assertFalse(second_state.ticket_created)
+        self.assertTrue(second_state.ticket_reused)
+        self.assertEqual(second_state.feishu_status, "skipped")
+        self.assertEqual(send_notification.call_count, 1)

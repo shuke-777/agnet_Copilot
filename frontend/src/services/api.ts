@@ -14,6 +14,7 @@ export type CopilotAnalyzeResponse = {
   is_abnormal: boolean;
   reply_draft: string;
   ticket_created: boolean;
+  ticket_reused: boolean;
   ticket_id: string | null;
   feishu_status: string;
   policy_sources: PolicySource[];
@@ -46,6 +47,13 @@ export type Ticket = {
   created_at: string;
   updated_at: string;
   events: TicketEvent[];
+  related_runs: Array<{
+    run_id: string;
+    intent: string | null;
+    user_message: string;
+    status: string;
+    created_at: string;
+  }>;
 };
 
 export type Order = {
@@ -94,6 +102,7 @@ export type AgentStep = {
   input_tokens?: number | null;
   output_tokens?: number | null;
   fallback_reason?: string | null;
+  cache_hit?: boolean;
 };
 
 export type MetricCount = { key: string; count: number };
