@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 
 import { analyzeCopilot } from "./services/api";
-import type { CopilotAnalyzeResponse } from "./services/api";
+import type { CopilotAnalyzeResponse, SessionOrderMismatch } from "./services/api";
 
 type ConversationMessage = {
   role: "user" | "assistant";
@@ -14,6 +14,7 @@ type CopilotAnalysisContextValue = {
   draft: string;
   result: CopilotAnalyzeResponse | null;
   errorMessage: string | null;
+  sessionOrderMismatch: SessionOrderMismatch | null;
   isAnalyzing: boolean;
   refreshToken: number;
   setDraft: (draft: string) => void;
@@ -23,8 +24,27 @@ type CopilotAnalysisContextValue = {
 
 const CopilotAnalysisContext = createContext<CopilotAnalysisContextValue | null>(null);
 
+let sessionSequence = 0;
+
 function makeSessionId() {
-  return `WEB-${Date.now()}`;
+  sessionSequence += 1;
+  return `WEB-${Date.now()}-${sessionSequence}`;
+}
+
+function getSessionOrderMismatch(error: unknown): SessionOrderMismatch | null {
+  const response = (error as {
+    response?: { status?: number; data?: { detail?: Partial<SessionOrderMismatch> } };
+  }).response;
+  const detail = response?.data?.detail;
+  if (
+    response?.status === 409
+    && detail?.code === "session_order_mismatch"
+    && typeof detail.bound_order_id === "string"
+    && typeof detail.requested_order_id === "string"
+  ) {
+    return detail as SessionOrderMismatch;
+  }
+  return null;
 }
 
 function getAnalysisErrorMessage(error: unknown) {
@@ -44,6 +64,7 @@ export function CopilotAnalysisProvider({ children }: { children: React.ReactNod
   const [draft, setDraft] = useState("");
   const [result, setResult] = useState<CopilotAnalyzeResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [sessionOrderMismatch, setSessionOrderMismatch] = useState<SessionOrderMismatch | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
 
@@ -53,6 +74,7 @@ export function CopilotAnalysisProvider({ children }: { children: React.ReactNod
 
     setIsAnalyzing(true);
     setErrorMessage(null);
+    setSessionOrderMismatch(null);
     try {
       const analysis = await analyzeCopilot({
         session_id: sessionId,
@@ -69,7 +91,9 @@ export function CopilotAnalysisProvider({ children }: { children: React.ReactNod
       setDraft("");
       setRefreshToken((current) => current + 1);
     } catch (error) {
-      setErrorMessage(getAnalysisErrorMessage(error));
+      const mismatch = getSessionOrderMismatch(error);
+      setSessionOrderMismatch(mismatch);
+      setErrorMessage(mismatch ? null : getAnalysisErrorMessage(error));
     } finally {
       setIsAnalyzing(false);
     }
@@ -79,10 +103,11 @@ export function CopilotAnalysisProvider({ children }: { children: React.ReactNod
     if (isAnalyzing) return;
     setSessionId(makeSessionId());
     setMessages([]);
-    setDraft("");
+    if (sessionOrderMismatch === null) setDraft("");
     setResult(null);
     setErrorMessage(null);
-  }, [isAnalyzing]);
+    setSessionOrderMismatch(null);
+  }, [isAnalyzing, sessionOrderMismatch]);
 
   const value = useMemo(() => ({
     sessionId,
@@ -90,12 +115,13 @@ export function CopilotAnalysisProvider({ children }: { children: React.ReactNod
     draft,
     result,
     errorMessage,
+    sessionOrderMismatch,
     isAnalyzing,
     refreshToken,
     setDraft,
     analyze,
     startNewConversation,
-  }), [analyze, draft, errorMessage, isAnalyzing, messages, refreshToken, result, sessionId, startNewConversation]);
+  }), [analyze, draft, errorMessage, isAnalyzing, messages, refreshToken, result, sessionId, sessionOrderMismatch, startNewConversation]);
 
   return <CopilotAnalysisContext.Provider value={value}>{children}</CopilotAnalysisContext.Provider>;
 }

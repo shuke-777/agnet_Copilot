@@ -7,6 +7,14 @@ export type PolicySource = {
   score: number;
 };
 
+export type TicketAssociation = "created" | "reused" | "session_linked" | "none";
+
+export type SessionOrderMismatch = {
+  code: "session_order_mismatch";
+  bound_order_id: string;
+  requested_order_id: string;
+};
+
 export type CopilotAnalyzeResponse = {
   run_id: string;
   intent: string;
@@ -15,6 +23,7 @@ export type CopilotAnalyzeResponse = {
   reply_draft: string;
   ticket_created: boolean;
   ticket_reused: boolean;
+  ticket_association: TicketAssociation;
   ticket_id: string | null;
   feishu_status: string;
   policy_sources: PolicySource[];

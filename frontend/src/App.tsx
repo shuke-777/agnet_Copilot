@@ -55,6 +55,7 @@ import type {
   Logistics,
   Order,
   Ticket,
+  TicketAssociation,
   TicketStats,
 } from "./services/api";
 
@@ -86,8 +87,35 @@ function formatPercentage(value: number | null | undefined): string {
   return value === null || value === undefined ? "-" : `${(value * 100).toFixed(1)}%`;
 }
 
+const ticketAssociationLabels: Record<TicketAssociation, string> = {
+  created: "已创建待处理工单",
+  reused: "已复用已有待处理工单",
+  session_linked: "已关联会话工单",
+  none: "未关联工单",
+};
+
+const ticketAssociationColors: Record<Exclude<TicketAssociation, "none">, string> = {
+  created: "blue",
+  reused: "cyan",
+  session_linked: "green",
+};
+
 function WorkspacePage() {
-  const { analyze, draft, errorMessage, isAnalyzing, messages, result, sessionId, setDraft, startNewConversation } = useCopilotAnalysis();
+  const {
+    analyze,
+    draft,
+    errorMessage,
+    isAnalyzing,
+    messages,
+    result,
+    sessionId,
+    sessionOrderMismatch,
+    setDraft,
+    startNewConversation,
+  } = useCopilotAnalysis();
+  const ticketAssociationLabel = result
+    ? ticketAssociationLabels[result.ticket_association]
+    : "等待人工确认";
 
   return (
     <section>
@@ -121,9 +149,7 @@ function WorkspacePage() {
           <Text className="panel-eyebrow">人工 Checkpoint</Text>
           <div className="metric-row">
             <strong>{result?.ticket_id ? "1" : "0"}</strong>
-            <Text type="secondary">
-              {result?.ticket_created ? "已创建待处理工单" : result?.ticket_reused ? "已关联已有待处理工单" : "等待人工确认"}
-            </Text>
+            <Text type="secondary">{ticketAssociationLabel}</Text>
           </div>
           <Text type="secondary">当前会话：{sessionId}。系统只给出建议与创建结果，状态推进仍由人工确认。</Text>
         </article>
@@ -146,6 +172,29 @@ function WorkspacePage() {
 
       {errorMessage && <Alert className="analysis-alert" message={errorMessage} showIcon type="error" />}
 
+      {sessionOrderMismatch && (
+        <Alert
+          action={(
+            <Button
+              aria-label="冲突后新建咨询"
+              icon={<PlusOutlined />}
+              onClick={startNewConversation}
+              size="small"
+            >
+              新建咨询
+            </Button>
+          )}
+          className="analysis-alert"
+          description={
+            `当前会话已绑定订单 ${sessionOrderMismatch.bound_order_id}，`
+            + `本轮识别订单 ${sessionOrderMismatch.requested_order_id}。请新建咨询后重试。`
+          }
+          message="当前会话不能切换订单"
+          showIcon
+          type="warning"
+        />
+      )}
+
       {result && (
         <div className="analysis-result">
           <div className="result-heading">
@@ -162,7 +211,12 @@ function WorkspacePage() {
             <Descriptions.Item label="识别意图">{result.intent}</Descriptions.Item>
             <Descriptions.Item label="订单号">{result.order_id || "未识别"}</Descriptions.Item>
             <Descriptions.Item label="工单结果">
-              {result.ticket_id ? <Link to={`/tickets/${result.ticket_id}`}>{result.ticket_reused ? `${result.ticket_id}（已复用）` : result.ticket_id}</Link> : "未创建工单"}
+              {result.ticket_id ? (
+                <Space size={4}>
+                  <Link to={`/tickets/${result.ticket_id}`}>{result.ticket_id}</Link>
+                  <Text type="secondary">（{ticketAssociationLabel}）</Text>
+                </Space>
+              ) : ticketAssociationLabel}
             </Descriptions.Item>
             <Descriptions.Item label="飞书通知">{result.feishu_status}</Descriptions.Item>
           </Descriptions>
@@ -200,8 +254,11 @@ function WorkspacePage() {
               <Text type="secondary">Agent Run</Text>
               <Link to={`/runs/${result.run_id}`}><Text code>{result.run_id}</Text></Link>
             </Space>
-            {result.ticket_created && <Tag color="blue">已创建催物流工单</Tag>}
-            {result.ticket_reused && <Tag color="cyan">已关联已有工单</Tag>}
+            {result.ticket_association !== "none" && (
+              <Tag color={ticketAssociationColors[result.ticket_association]}>
+                {ticketAssociationLabel}
+              </Tag>
+            )}
           </div>
         </div>
       )}

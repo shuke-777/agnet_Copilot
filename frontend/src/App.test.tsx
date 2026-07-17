@@ -44,6 +44,8 @@ describe("App", () => {
         is_abnormal: true,
         reply_draft: "物流超过 72 小时未更新，已为您创建催物流工单。",
         ticket_created: true,
+        ticket_reused: false,
+        ticket_association: "created",
         ticket_id: "TCK-1001",
         feishu_status: "disabled",
         policy_sources: [
@@ -113,6 +115,8 @@ describe("App", () => {
         is_abnormal: true,
         reply_draft: "已记录本次咨询。",
         ticket_created: false,
+        ticket_reused: false,
+        ticket_association: "none",
         ticket_id: null,
         feishu_status: "skipped",
         policy_sources: [],
@@ -136,6 +140,69 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "新建咨询" }));
     expect(screen.getByRole("textbox", { name: "用户问题" })).toHaveValue("");
     expect(screen.queryByText("已记录本次咨询。")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["created", "已创建待处理工单", "TCK-ASSOCIATION"],
+    ["reused", "已复用已有待处理工单", "TCK-ASSOCIATION"],
+    ["session_linked", "已关联会话工单", "TCK-ASSOCIATION"],
+    ["none", "未关联工单", null],
+  ] as const)("renders the %s ticket association", async (ticketAssociation, expectedLabel, ticketId) => {
+    const user = userEvent.setup();
+    mockedAxios.post.mockResolvedValue({
+      data: {
+        run_id: `RUN-${ticketAssociation}`,
+        intent: "logistics_delay",
+        order_id: "ORD-1001",
+        is_abnormal: true,
+        reply_draft: "已生成处理建议。",
+        ticket_created: ticketAssociation === "created",
+        ticket_reused: ticketAssociation === "reused",
+        ticket_association: ticketAssociation,
+        ticket_id: ticketId,
+        feishu_status: "skipped",
+        policy_sources: [],
+      },
+    });
+
+    render(<MemoryRouter initialEntries={["/workspace"]}><App /></MemoryRouter>);
+    await user.type(screen.getByRole("textbox", { name: "用户问题" }), "订单 ORD-1001 的物流情况");
+    await user.click(screen.getByRole("button", { name: /开始分析/ }));
+
+    expect((await screen.findAllByText(expectedLabel)).length).toBeGreaterThan(0);
+  });
+
+  it("preserves the draft and starts a clean session after an order conflict", async () => {
+    const user = userEvent.setup();
+    mockedAxios.post.mockRejectedValue({
+      response: {
+        status: 409,
+        data: {
+          detail: {
+            code: "session_order_mismatch",
+            bound_order_id: "ORD-1001",
+            requested_order_id: "ORD-1002",
+          },
+        },
+      },
+    });
+
+    render(<MemoryRouter initialEntries={["/workspace"]}><App /></MemoryRouter>);
+    const input = screen.getByRole("textbox", { name: "用户问题" });
+    const originalSession = screen.getByText(/当前会话：/).textContent;
+    await user.type(input, "查订单 ORD-1002");
+    await user.click(screen.getByRole("button", { name: /开始分析/ }));
+
+    expect(await screen.findByText(/当前会话已绑定订单 ORD-1001，本轮识别订单 ORD-1002/))
+      .toBeInTheDocument();
+    expect(input).toHaveValue("查订单 ORD-1002");
+    expect(screen.queryByLabelText("当前咨询记录")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "冲突后新建咨询" }));
+
+    expect(input).toHaveValue("查订单 ORD-1002");
+    expect(screen.getByText(/当前会话：/).textContent).not.toBe(originalSession);
+    expect(screen.queryByText(/当前会话已绑定订单/)).not.toBeInTheDocument();
   });
 
   it("loads tickets, opens the detail page, and lets an agent claim a ticket", async () => {
