@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, foreign, mapped_column, relationship
 
 from models.database import Base
@@ -107,3 +107,22 @@ class TicketEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     ticket: Mapped[Ticket] = relationship(back_populates="events")
+
+
+class SessionTicketBinding(Base):
+    __tablename__ = "session_ticket_bindings"
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id",
+            "user_scope",
+            name="uq_session_ticket_binding_scope",
+        ),
+    )
+
+    binding_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(64), index=True)
+    user_scope: Mapped[str] = mapped_column(String(64), index=True)
+    order_id: Mapped[str] = mapped_column(ForeignKey("orders.order_id"), index=True)
+    ticket_id: Mapped[str] = mapped_column(ForeignKey("tickets.ticket_id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)

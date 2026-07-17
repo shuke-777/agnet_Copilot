@@ -4,13 +4,14 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from models.agent_trace import AgentRun, AgentStep
-from models.business import Logistics, Order, Ticket
+from models.business import Logistics, Order, SessionTicketBinding, Ticket
 from models.database import Base, engine
 from models.feishu_event import FeishuEvent
 
 
 _TRACE_MODELS = (AgentRun, AgentStep)
 _FEISHU_MODELS = (FeishuEvent,)
+_SESSION_BINDING_MODELS = (SessionTicketBinding,)
 
 
 def init_database() -> None:
