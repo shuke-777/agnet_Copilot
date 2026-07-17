@@ -5,11 +5,26 @@ from agents.state import CopilotState
 from api.business import make_id
 from models.agent_trace import AgentRun
 from models.business import Ticket, TicketEvent, utc_now
+from services.session_ticket_binding_service import SessionTicketBindingService
 from services.trace_service import record_agent_step
 
 
 def ticket_create_node(db: Session, state: CopilotState) -> CopilotState:
-    if state.intent != "logistics_delay" or not state.is_abnormal:
+    if state.intent != "logistics_delay":
+        return state
+
+    if state.active_session_ticket is not None:
+        ticket = state.active_session_ticket
+        state.ticket_association = "session_linked"
+        output_summary = f"session_linked:{ticket.ticket_id}"
+        return _associate_ticket(db, state, ticket, output_summary)
+
+    if (
+        state.order is None
+        or state.order.status != "shipped"
+        or not state.is_abnormal
+        or not state.follow_up_requested
+    ):
         return state
 
     ticket = db.scalar(
@@ -36,7 +51,9 @@ def ticket_create_node(db: Session, state: CopilotState) -> CopilotState:
             created_by="agent",
         )
         db.add(ticket)
+        db.flush()
         state.ticket_created = True
+        state.ticket_association = "created"
         output_summary = f"created:{ticket.ticket_id}"
     else:
         now = utc_now()
@@ -58,14 +75,28 @@ def ticket_create_node(db: Session, state: CopilotState) -> CopilotState:
         )
         ticket.updated_at = now
         state.ticket_reused = True
+        state.ticket_association = "reused"
         output_summary = f"reused:{ticket.ticket_id}"
 
+    SessionTicketBindingService(db).bind_ticket(
+        session_id=state.payload.session_id,
+        user_id=state.payload.user_id,
+        order_id=ticket.order_id,
+        ticket_id=ticket.ticket_id,
+    )
+    return _associate_ticket(db, state, ticket, output_summary)
+
+
+def _associate_ticket(
+    db: Session,
+    state: CopilotState,
+    ticket: Ticket,
+    output_summary: str,
+) -> CopilotState:
     run = db.get(AgentRun, state.run_id)
     if run is None:
         raise ValueError(f"Agent run not found: {state.run_id}")
     run.ticket_id = ticket.ticket_id
-    db.commit()
-    db.refresh(ticket)
 
     state.ticket_id = ticket.ticket_id
     step = record_agent_step(

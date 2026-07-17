@@ -1,11 +1,11 @@
 print('0707_1')
 print('time_stamp:2026_0707')
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.documents import Document
 from models.agent_trace import AgentStep
-from models.business import Logistics, Order
+from models.business import Logistics, Order, Ticket
 from schemas.copilot import CopilotAnalyzeRequest
 from schemas.policy import PolicySource
 from services.session_memory_service import SessionContext
@@ -26,9 +26,12 @@ class CopilotState:
     policy_candidates: list[Document] = field(default_factory=list)
     retrieved_policies: list[PolicySource] = field(default_factory=list)
     reply_draft: str | None = None
+    active_session_ticket: Ticket | None = None
+    follow_up_requested: bool = False
     ticket_id: str | None = None
     ticket_created: bool = False
     ticket_reused: bool = False
+    ticket_association: Literal["created", "reused", "session_linked", "none"] = "none"
     feishu_status: str = "skipped"
     rag_cache: Any = None
     steps: list[AgentStep] = field(default_factory=list)

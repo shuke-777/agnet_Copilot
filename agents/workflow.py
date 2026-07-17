@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from agents.nodes.abnormal_check_node import abnormal_check_node
 from agents.nodes.feishu_notify_node import feishu_notify_node
+from agents.nodes.follow_up_check_node import follow_up_check_node
 from agents.nodes.intent_node import intent_node
 from agents.nodes.logistics_query_node import logistics_query_node
 from agents.nodes.order_extract_node import order_extract_node
@@ -14,6 +15,7 @@ from agents.nodes.policy_retrieval_node import policy_retrieval_node
 from agents.nodes.policy_rerank_node import policy_rerank_node
 from agents.nodes.query_rewrite_node import query_rewrite_node
 from agents.nodes.reply_generate_node import reply_generate_node
+from agents.nodes.session_binding_check_node import session_binding_check_node
 from agents.nodes.ticket_create_node import ticket_create_node
 from agents.state import CopilotState
 from schemas.copilot import CopilotAnalyzeRequest
@@ -27,8 +29,10 @@ WORKFLOW_NODES: tuple[WorkflowNode, ...] = (
     intent_node,
     order_extract_node,
     order_query_node,
+    session_binding_check_node,
     logistics_query_node,
     abnormal_check_node,
+    follow_up_check_node,
     query_rewrite_node,
     policy_retrieval_node,
     policy_rerank_node,

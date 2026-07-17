@@ -23,6 +23,11 @@ def feishu_notify_node(db: Session, state: CopilotState) -> CopilotState:
 
     if not state.ticket_created:
         state.feishu_status = "skipped"
+        output_summary = (
+            "已关联会话主工单，跳过飞书新建工单通知"
+            if state.ticket_association == "session_linked"
+            else "复用已有未关闭工单，跳过飞书新建工单通知"
+        )
         step = record_agent_step(
             db,
             run_id=state.run_id,
@@ -30,7 +35,7 @@ def feishu_notify_node(db: Session, state: CopilotState) -> CopilotState:
             step_type="webhook",
             status="skipped",
             input_summary=state.ticket_id,
-            output_summary="复用已有未关闭工单，跳过飞书新建工单通知",
+            output_summary=output_summary,
         )
         state.steps.append(step)
         return state

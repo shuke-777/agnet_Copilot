@@ -3,11 +3,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from sqlalchemy import func, select
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from models.database import SessionLocal
+from models.business import TicketEvent
 from schemas.copilot import CopilotAnalyzeRequest
 from services.trace_service import finish_agent_run, start_agent_run
 from agents.state import CopilotState
@@ -26,7 +29,7 @@ class TestCopilotWorkflow(unittest.TestCase):
         payload = CopilotAnalyzeRequest(
             session_id="SESSION-WORKFLOW-001",
             user_id="USER-001",
-            user_message="我的订单 ORD-1001 怎么还没收到？",
+            user_message="我的订单 ORD-1001 怎么还没收到？帮我催一下物流。",
         )
 
         with patch.dict("os.environ", {"FEISHU_WEBHOOK_URL": ""}), SessionLocal() as db:
@@ -54,8 +57,10 @@ class TestCopilotWorkflow(unittest.TestCase):
                     "intent_recognition",
                     "order_extract",
                     "order_query",
+                    "session_binding_check",
                     "logistics_query",
                     "abnormal_check",
+                    "follow_up_check",
                     "query_rewrite",
                     "policy_retrieval",
                     "policy_rerank",
@@ -69,7 +74,7 @@ class TestCopilotWorkflow(unittest.TestCase):
         payload = CopilotAnalyzeRequest(
             session_id="SESSION-LANGGRAPH-001",
             user_id="USER-001",
-            user_message="我的订单 ORD-1001 怎么还没收到？",
+            user_message="我的订单 ORD-1001 怎么还没收到？帮我催一下物流。",
         )
 
         with patch.dict("os.environ", {"FEISHU_WEBHOOK_URL": ""}), SessionLocal() as db:
@@ -169,11 +174,97 @@ class TestCopilotWorkflow(unittest.TestCase):
             send_notification.return_value.message = "Feishu webhook sent"
             first_run = start_agent_run(db, session_id=payload.session_id, user_id=payload.user_id, user_message=payload.user_message)
             first_state = run_copilot_workflow(db=db, payload=payload, run_id=first_run.run_id)
-            second_run = start_agent_run(db, session_id=payload.session_id, user_id=payload.user_id, user_message=payload.user_message)
-            second_state = run_copilot_workflow(db=db, payload=payload, run_id=second_run.run_id)
+            second_payload = CopilotAnalyzeRequest(
+                session_id=payload.session_id,
+                user_id=payload.user_id,
+                user_message="订单 ORD-1001 的物流现在进展怎么样？",
+            )
+            second_run = start_agent_run(
+                db,
+                session_id=second_payload.session_id,
+                user_id=second_payload.user_id,
+                user_message=second_payload.user_message,
+            )
+            second_state = run_copilot_workflow(
+                db=db,
+                payload=second_payload,
+                run_id=second_run.run_id,
+            )
+            followup_event_count = db.scalar(
+                select(func.count(TicketEvent.event_id)).where(
+                    TicketEvent.ticket_id == first_state.ticket_id,
+                    TicketEvent.event_type == "copilot_followup_analyzed",
+                )
+            )
 
         self.assertTrue(first_state.ticket_created)
         self.assertFalse(second_state.ticket_created)
-        self.assertTrue(second_state.ticket_reused)
+        self.assertFalse(second_state.ticket_reused)
+        self.assertEqual(first_state.ticket_association, "created")
+        self.assertEqual(second_state.ticket_association, "session_linked")
+        self.assertEqual(second_state.ticket_id, first_state.ticket_id)
+        self.assertEqual(followup_event_count, 0)
         self.assertEqual(second_state.feishu_status, "skipped")
         self.assertEqual(send_notification.call_count, 1)
+
+    def test_abnormal_logistics_without_explicit_follow_up_does_not_create_ticket(self) -> None:
+        payload = CopilotAnalyzeRequest(
+            session_id="SESSION-NO-FOLLOWUP",
+            user_id="USER-001",
+            user_message="订单 ORD-1001 一直没收到。",
+        )
+
+        with patch.dict("os.environ", {"FEISHU_WEBHOOK_URL": ""}), SessionLocal() as db:
+            run = start_agent_run(
+                db,
+                session_id=payload.session_id,
+                user_id=payload.user_id,
+                user_message=payload.user_message,
+            )
+            state = run_copilot_workflow(db=db, payload=payload, run_id=run.run_id)
+
+        self.assertFalse(state.follow_up_requested)
+        self.assertEqual(state.ticket_association, "none")
+        self.assertIsNone(state.ticket_id)
+
+    def test_follow_up_request_is_based_on_current_turn_only(self) -> None:
+        first_payload = CopilotAnalyzeRequest(
+            session_id="SESSION-CURRENT-TURN",
+            user_id="USER-001",
+            user_message="订单 ORD-1001 没收到，帮我催物流。",
+        )
+        second_payload = CopilotAnalyzeRequest(
+            session_id=first_payload.session_id,
+            user_id=first_payload.user_id,
+            user_message="订单 ORD-1001 的物流现在怎么样？",
+            history=[
+                CopilotHistoryMessage(role="user", content=first_payload.user_message),
+            ],
+        )
+
+        with patch.dict("os.environ", {"FEISHU_WEBHOOK_URL": ""}), SessionLocal() as db:
+            first_run = start_agent_run(
+                db,
+                session_id=first_payload.session_id,
+                user_id=first_payload.user_id,
+                user_message=first_payload.user_message,
+            )
+            first_state = run_copilot_workflow(
+                db=db,
+                payload=first_payload,
+                run_id=first_run.run_id,
+            )
+            second_run = start_agent_run(
+                db,
+                session_id=second_payload.session_id,
+                user_id=second_payload.user_id,
+                user_message=second_payload.user_message,
+            )
+            second_state = run_copilot_workflow(
+                db=db,
+                payload=second_payload,
+                run_id=second_run.run_id,
+            )
+
+        self.assertTrue(first_state.follow_up_requested)
+        self.assertFalse(second_state.follow_up_requested)

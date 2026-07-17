@@ -31,12 +31,18 @@ def order_extract_node(db: Session, state: CopilotState) -> CopilotState:
     if state.order_id is None:
         history_messages = [message.content for message in reversed(state.payload.history) if message.role == "user"]
         memory_messages = [message.content for message in reversed(state.session_context.messages) if message.role == "user"]
+        prior_runs = select(AgentRun.user_message).where(
+            AgentRun.session_id == state.payload.session_id,
+            AgentRun.run_id != state.run_id,
+            AgentRun.status == "success",
+        )
+        if state.payload.user_id is None:
+            prior_runs = prior_runs.where(AgentRun.user_id.is_(None))
+        else:
+            prior_runs = prior_runs.where(AgentRun.user_id == state.payload.user_id)
         prior_session_messages = list(
             db.scalars(
-                select(AgentRun.user_message)
-                .where(AgentRun.session_id == state.payload.session_id, AgentRun.run_id != state.run_id)
-                .order_by(AgentRun.created_at.desc())
-                .limit(5)
+                prior_runs.order_by(AgentRun.created_at.desc()).limit(5)
             )
         )
         for message in [*history_messages, *memory_messages, *prior_session_messages]:
