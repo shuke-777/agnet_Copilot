@@ -50,6 +50,7 @@ def analyze_after_sales_issue(
             reply_draft=state.reply_draft or "",
             ticket_created=state.ticket_created,
             ticket_reused=state.ticket_reused,
+            ticket_association=state.ticket_association,
             ticket_id=state.ticket_id,
             feishu_status=state.feishu_status,
             policy_sources=state.retrieved_policies,
