@@ -28,10 +28,15 @@ describe("App", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Copilot 工作台" })).toBeInTheDocument();
+    expect(screen.getByText("本地演示环境")).toBeInTheDocument();
+    expect(screen.queryByText("M8 前端工作台")).not.toBeInTheDocument();
+    expect(screen.queryByText("M8.6 业务关联")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("link", { name: "工单中心" }));
 
     expect(await screen.findByRole("heading", { name: "工单中心" })).toBeInTheDocument();
+    expect(screen.getByText("实时协同")).toBeInTheDocument();
+    expect(screen.queryByText("M8.6 业务关联")).not.toBeInTheDocument();
   });
 
   it("submits an after-sales question and renders the Copilot analysis result", async () => {
@@ -39,24 +44,77 @@ describe("App", () => {
     mockedAxios.post.mockResolvedValue({
       data: {
         run_id: "RUN-1001",
-        intent: "logistics_delay",
-        order_id: "ORD-1001",
-        is_abnormal: true,
-        reply_draft: "物流超过 72 小时未更新，已为您创建催物流工单。",
-        ticket_created: true,
-        ticket_reused: false,
-        ticket_association: "created",
-        ticket_id: "TCK-1001",
-        feishu_status: "disabled",
-        policy_sources: [
-          {
-            source_id: "logistics_delay_72h_sop",
-            title: "物流超过 72 小时未更新处理 SOP",
-            content: "核实物流卡点后创建催物流工单。",
-            score: 0.92,
-          },
-        ],
+        status: "running",
+        events_url: "/api/runs/RUN-1001/events",
       },
+    });
+    mockedAxios.get.mockImplementation((url) => {
+      if (url === "/api/runs/RUN-1001") {
+        return Promise.resolve({
+          data: {
+            run_id: "RUN-1001",
+            session_id: "WEB-1001",
+            user_id: "客服A",
+            user_message: "订单 ORD-1001 一直没收到，帮我催一下物流。",
+            order_id: "ORD-1001",
+            ticket_id: "TCK-1001",
+            intent: "logistics_delay",
+            status: "success",
+            total_duration_ms: 38,
+            result_payload: JSON.stringify({
+              run_id: "RUN-1001",
+              intent: "logistics_delay",
+              order_id: "ORD-1001",
+              is_abnormal: true,
+              reply_draft: "物流超过 72 小时未更新，已为您创建催物流工单。",
+              ticket_created: true,
+              ticket_reused: false,
+              ticket_association: "created",
+              ticket_id: "TCK-1001",
+              approval_required: false,
+              approval_status: "not_required",
+              approval_reason: "物流催办不涉及资金、库存或权益变更",
+              feishu_status: "disabled",
+              policy_sources: [
+                {
+                  source_id: "logistics_delay_72h_sop",
+                  title: "物流超过 72 小时未更新处理 SOP",
+                  content: "核实物流卡点后创建催物流工单。",
+                  score: 0.92,
+                },
+              ],
+            }),
+            created_at: "2026-07-14T10:00:00",
+            finished_at: "2026-07-14T10:00:01",
+          },
+        });
+      }
+      if (url === "/api/runs/RUN-1001/steps") {
+        return Promise.resolve({
+          data: [
+            {
+              step_id: "STP-1001",
+              run_id: "RUN-1001",
+              step_name: "intent_recognition",
+              step_type: "agent",
+              status: "success",
+              start_time: "2026-07-14T10:00:00",
+              end_time: "2026-07-14T10:00:00",
+              duration_ms: 3,
+              input_summary: "订单未收到",
+              output_summary: "识别物流异常意图",
+              error_message: null,
+              llm_provider: "disabled",
+              llm_model: null,
+              input_tokens: null,
+              output_tokens: null,
+              fallback_reason: "LLM provider is disabled",
+              cache_hit: false,
+            },
+          ],
+        });
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`));
     });
 
     render(
@@ -72,11 +130,12 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: /开始分析/ }));
 
     expect(mockedAxios.post).toHaveBeenCalledWith(
-      "/api/copilot/analyze",
+      "/api/copilot/analyze/start",
       expect.objectContaining({
         user_message: "订单 ORD-1001 一直没收到，帮我催一下物流。",
       }),
     );
+    expect(await screen.findByText("实时链路")).toBeInTheDocument();
     expect(await screen.findByText("物流超过 72 小时未更新，已为您创建催物流工单。"))
       .toBeInTheDocument();
     expect(screen.getByText("TCK-1001")).toBeInTheDocument();
@@ -110,17 +169,70 @@ describe("App", () => {
     mockedAxios.post.mockResolvedValue({
       data: {
         run_id: "RUN-CONTEXT-001",
-        intent: "logistics_delay",
-        order_id: "ORD-1001",
-        is_abnormal: true,
-        reply_draft: "已记录本次咨询。",
-        ticket_created: false,
-        ticket_reused: false,
-        ticket_association: "none",
-        ticket_id: null,
-        feishu_status: "skipped",
-        policy_sources: [],
+        status: "running",
+        events_url: "/api/runs/RUN-CONTEXT-001/events",
       },
+    });
+    mockedAxios.get.mockImplementation((url) => {
+      if (url === "/api/runs/RUN-CONTEXT-001") {
+        return Promise.resolve({
+          data: {
+            run_id: "RUN-CONTEXT-001",
+            session_id: "WEB-1001",
+            user_id: "客服A",
+            user_message: "订单 ORD-1001 还没收到。",
+            order_id: "ORD-1001",
+            ticket_id: null,
+            intent: "logistics_delay",
+            status: "success",
+            total_duration_ms: 12,
+            result_payload: JSON.stringify({
+              run_id: "RUN-CONTEXT-001",
+              intent: "logistics_delay",
+              order_id: "ORD-1001",
+              is_abnormal: true,
+              reply_draft: "已记录本次咨询。",
+              ticket_created: false,
+              ticket_reused: false,
+              ticket_association: "none",
+              ticket_id: null,
+              approval_required: false,
+              approval_status: "not_required",
+              approval_reason: "物流催办不涉及资金、库存或权益变更",
+              feishu_status: "skipped",
+              policy_sources: [],
+            }),
+            created_at: "2026-07-14T10:00:00",
+            finished_at: "2026-07-14T10:00:01",
+          },
+        });
+      }
+      if (url === "/api/runs/RUN-CONTEXT-001/steps") {
+        return Promise.resolve({
+          data: [
+            {
+              step_id: "STP-1",
+              run_id: "RUN-CONTEXT-001",
+              step_name: "intent_recognition",
+              step_type: "agent",
+              status: "success",
+              start_time: "2026-07-14T10:00:00",
+              end_time: "2026-07-14T10:00:00",
+              duration_ms: 2,
+              input_summary: null,
+              output_summary: null,
+              error_message: null,
+              llm_provider: null,
+              llm_model: null,
+              input_tokens: null,
+              output_tokens: null,
+              fallback_reason: null,
+              cache_hit: false,
+            },
+          ],
+        });
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`));
     });
 
     render(<MemoryRouter initialEntries={["/workspace"]}><App /></MemoryRouter>);
@@ -152,17 +264,48 @@ describe("App", () => {
     mockedAxios.post.mockResolvedValue({
       data: {
         run_id: `RUN-${ticketAssociation}`,
-        intent: "logistics_delay",
-        order_id: "ORD-1001",
-        is_abnormal: true,
-        reply_draft: "已生成处理建议。",
-        ticket_created: ticketAssociation === "created",
-        ticket_reused: ticketAssociation === "reused",
-        ticket_association: ticketAssociation,
-        ticket_id: ticketId,
-        feishu_status: "skipped",
-        policy_sources: [],
+        status: "running",
+        events_url: `/api/runs/RUN-${ticketAssociation}/events`,
       },
+    });
+    mockedAxios.get.mockImplementation((url) => {
+      if (url === `/api/runs/RUN-${ticketAssociation}`) {
+        return Promise.resolve({
+          data: {
+            run_id: `RUN-${ticketAssociation}`,
+            session_id: "WEB-1001",
+            user_id: "客服A",
+            user_message: "订单 ORD-1001 的物流情况",
+            order_id: "ORD-1001",
+            ticket_id: ticketId,
+            intent: "logistics_delay",
+            status: "success",
+            total_duration_ms: 12,
+            result_payload: JSON.stringify({
+              run_id: `RUN-${ticketAssociation}`,
+              intent: "logistics_delay",
+              order_id: "ORD-1001",
+              is_abnormal: true,
+              reply_draft: "已生成处理建议。",
+              ticket_created: ticketAssociation === "created",
+              ticket_reused: ticketAssociation === "reused",
+              ticket_association: ticketAssociation,
+              ticket_id: ticketId,
+              approval_required: false,
+              approval_status: "not_required",
+              approval_reason: "物流催办不涉及资金、库存或权益变更",
+              feishu_status: "skipped",
+              policy_sources: [],
+            }),
+            created_at: "2026-07-14T10:00:00",
+            finished_at: "2026-07-14T10:00:01",
+          },
+        });
+      }
+      if (url === `/api/runs/RUN-${ticketAssociation}/steps`) {
+        return Promise.resolve({ data: [] });
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`));
     });
 
     render(<MemoryRouter initialEntries={["/workspace"]}><App /></MemoryRouter>);
@@ -222,6 +365,11 @@ describe("App", () => {
               suggested_action: "联系承运商核实卡点。",
               assigned_to: null,
               created_by: "agent",
+              approval_required: false,
+              approval_status: "not_required",
+              approval_reason: null,
+              approval_decided_by: null,
+              approval_decided_at: null,
               created_at: "2026-07-13T10:00:00",
               updated_at: "2026-07-13T10:00:00",
               events: [],
@@ -242,6 +390,11 @@ describe("App", () => {
             suggested_action: "联系承运商核实卡点。",
             assigned_to: null,
             created_by: "agent",
+            approval_required: false,
+            approval_status: "not_required",
+            approval_reason: null,
+            approval_decided_by: null,
+            approval_decided_at: null,
             created_at: "2026-07-13T10:00:00",
             updated_at: "2026-07-13T10:00:00",
             events: [
@@ -279,6 +432,11 @@ describe("App", () => {
         suggested_action: "联系承运商核实卡点。",
         assigned_to: "客服A",
         created_by: "agent",
+        approval_required: false,
+        approval_status: "not_required",
+        approval_reason: null,
+        approval_decided_by: null,
+        approval_decided_at: null,
         created_at: "2026-07-13T10:00:00",
         updated_at: "2026-07-13T10:01:00",
         events: [],
@@ -511,6 +669,16 @@ describe("App", () => {
           },
         });
       }
+      if (url === "/api/dashboard/risk-ranking") {
+        return Promise.resolve({
+          data: {
+            source: "redis",
+            carrier_risks: [{ key: "顺丰速运", score: 3, count: 3 }],
+            high_priority_tickets: [{ key: "TCK-RISK-001", score: 1, count: 1 }],
+            frequent_issue_risks: [{ key: "logistics_delay", score: 6, count: 6 }],
+          },
+        });
+      }
       return Promise.reject(new Error(`Unexpected URL: ${url}`));
     });
 
@@ -525,10 +693,15 @@ describe("App", () => {
     expect(screen.getByLabelText("指标 Agent 成功率: 95.0%")).toBeInTheDocument();
     expect(screen.getByLabelText("指标 飞书通知成功率: 87.5%")).toBeInTheDocument();
     expect(screen.getByText("工单状态分布")).toBeInTheDocument();
+    expect(screen.getByText("运营风险榜")).toBeInTheDocument();
+    expect(screen.getByText("顺丰速运")).toBeInTheDocument();
+    expect(screen.getByText("TCK-RISK-001")).toBeInTheDocument();
+    expect(screen.getByText("logistics_delay")).toBeInTheDocument();
     expect(screen.getAllByText("policy_retrieval")).toHaveLength(1);
     expect(mockedAxios.get).toHaveBeenCalledWith("/api/dashboard/overview");
     expect(mockedAxios.get).toHaveBeenCalledWith("/api/dashboard/ticket-stats");
     expect(mockedAxios.get).toHaveBeenCalledWith("/api/dashboard/agent-performance");
+    expect(mockedAxios.get).toHaveBeenCalledWith("/api/dashboard/risk-ranking");
   });
 
   it("keeps dashboard metrics visible when a secondary dashboard request fails", async () => {
@@ -559,6 +732,9 @@ describe("App", () => {
             step_performance: [],
           },
         });
+      }
+      if (url === "/api/dashboard/risk-ranking") {
+        return Promise.reject(new Error("network error"));
       }
       return Promise.reject(new Error(`Unexpected URL: ${url}`));
     });

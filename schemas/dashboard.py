@@ -36,3 +36,16 @@ class AgentPerformance(BaseModel):
     average_run_duration_ms: float | None
     agent_run_success_rate: float | None
     step_performance: list[StepPerformance] = Field(default_factory=list)
+
+
+class RiskRankingItem(BaseModel):
+    key: str
+    score: float
+    count: int
+
+
+class RiskRanking(BaseModel):
+    source: str
+    carrier_risks: list[RiskRankingItem] = Field(default_factory=list)
+    high_priority_tickets: list[RiskRankingItem] = Field(default_factory=list)
+    frequent_issue_risks: list[RiskRankingItem] = Field(default_factory=list)

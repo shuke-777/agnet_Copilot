@@ -9,7 +9,12 @@ class IntentRecognitionResult(BaseModel):
         "return",
         "freight",
         "shipping_timeliness",
+        "exchange",
+        "address_change",
+        "cancel_order",
+        "compensation",
         "logistics_delay",
+        "logistics_query",
         "unknown",
     ]
 

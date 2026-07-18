@@ -63,6 +63,9 @@ class TicketCreate(BaseModel):
     suggested_action: str = Field(min_length=1)
     assigned_to: str | None = Field(default=None, max_length=64)
     created_by: str = Field(default="agent", min_length=1, max_length=64)
+    approval_required: bool = False
+    approval_status: Literal["not_required", "pending", "approved", "rejected"] = "not_required"
+    approval_reason: str | None = None
 
 
 class TicketUpdate(BaseModel):
@@ -72,6 +75,9 @@ class TicketUpdate(BaseModel):
     summary: str | None = Field(default=None, min_length=1)
     suggested_action: str | None = Field(default=None, min_length=1)
     assigned_to: str | None = Field(default=None, max_length=64)
+    approval_required: bool | None = None
+    approval_status: Literal["not_required", "pending", "approved", "rejected"] | None = None
+    approval_reason: str | None = None
 
 
 class TicketActionRequest(BaseModel):
@@ -104,6 +110,11 @@ class TicketRead(BaseModel):
     suggested_action: str
     assigned_to: str | None
     created_by: str
+    approval_required: bool
+    approval_status: str
+    approval_reason: str | None
+    approval_decided_by: str | None
+    approval_decided_at: datetime | None
     created_at: datetime
     updated_at: datetime
     events: list[TicketEventRead] = []
@@ -113,7 +124,7 @@ class TicketRead(BaseModel):
 class FeishuCallbackRequest(BaseModel):
     event_id: str = Field(min_length=1, max_length=128)
     ticket_id: str = Field(min_length=1, max_length=64)
-    action: Literal["claim", "resolve", "reopen"]
+    action: Literal["claim", "resolve", "reopen", "approve", "reject", "manual_confirm"]
     operator: str = Field(min_length=1, max_length=64)
 
 

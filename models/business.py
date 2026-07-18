@@ -63,6 +63,11 @@ class Ticket(Base):
     suggested_action: Mapped[str] = mapped_column(Text)
     assigned_to: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_by: Mapped[str] = mapped_column(String(64), default="agent")
+    approval_required: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    approval_status: Mapped[str] = mapped_column(String(32), default="not_required", index=True)
+    approval_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    approval_decided_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    approval_decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 

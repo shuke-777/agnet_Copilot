@@ -32,6 +32,9 @@ class CopilotState:
     ticket_created: bool = False
     ticket_reused: bool = False
     ticket_association: Literal["created", "reused", "session_linked", "none"] = "none"
+    approval_required: bool = False
+    approval_status: Literal["not_required", "pending", "approved", "rejected"] = "not_required"
+    approval_reason: str = "物流催办不涉及资金、库存或权益变更"
     feishu_status: str = "skipped"
     rag_cache: Any = None
     steps: list[AgentStep] = field(default_factory=list)

@@ -127,3 +127,17 @@ class TestDashboardApi(unittest.TestCase):
         self.assertEqual(step_stats["feishu_notify"]["count"], 3)
         self.assertEqual(step_stats["feishu_notify"]["success_count"], 1)
         self.assertEqual(step_stats["feishu_notify"]["failed_count"], 1)
+
+    def test_risk_ranking_returns_sqlite_fallback_metrics_when_redis_is_disabled(self) -> None:
+        self.seed_dashboard_data()
+
+        response = self.client.get("/api/dashboard/risk-ranking")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["source"], "sqlite_fallback")
+        carrier_risks = {item["key"]: item for item in body["carrier_risks"]}
+        self.assertEqual(carrier_risks["顺丰速运"], {"key": "顺丰速运", "score": 1.0, "count": 1})
+        high_priority_items = {item["key"]: item for item in body["high_priority_tickets"]}
+        self.assertIn("TCK-", next(iter(high_priority_items)))
+        self.assertEqual(body["frequent_issue_risks"][0], {"key": "logistics_delay", "score": 2.0, "count": 2})

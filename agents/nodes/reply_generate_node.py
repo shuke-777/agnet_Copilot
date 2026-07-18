@@ -27,6 +27,30 @@ def build_reply_draft(state: CopilotState) -> str:
             "我们会先核实商品是否满足退货条件，再向您说明申请和寄回要求。"
             f"{policy_hint}"
         )
+    if state.intent == "exchange":
+        return (
+            f"您好，已收到您关于订单 {state.order.order_id} 的换货咨询。"
+            "我们会核实商品状态、库存和寄回要求，审核确认后再同步后续处理方式。"
+            f"{policy_hint}"
+        )
+    if state.intent == "address_change":
+        return (
+            f"您好，已收到您关于订单 {state.order.order_id} 的改地址诉求。"
+            "由于订单发货后改地址涉及承运商改派和履约风险，我们会先提交人工审核确认。"
+            f"{policy_hint}"
+        )
+    if state.intent == "cancel_order":
+        return (
+            f"您好，已收到您关于订单 {state.order.order_id} 的取消订单诉求。"
+            "我们会先核实订单发货和交易状态，审核确认后再同步可处理方式。"
+            f"{policy_hint}"
+        )
+    if state.intent == "compensation":
+        return (
+            f"您好，已收到您关于订单 {state.order.order_id} 的补偿诉求。"
+            "补偿或赔付涉及权益处理，我们会记录原因并提交人工审核确认。"
+            f"{policy_hint}"
+        )
     if state.intent == "freight":
         return (
             f"您好，已收到您关于订单 {state.order.order_id} 的运费咨询。"
@@ -52,6 +76,22 @@ def build_reply_draft(state: CopilotState) -> str:
     )
 
 
+def has_unresolved_placeholder(reply_draft: str) -> bool:
+    placeholder_markers = (
+        "【",
+        "】",
+        "{",
+        "}",
+        "[时间]",
+        "[签收时间]",
+        "[具体时间]",
+        "XX",
+        "xx",
+        "待补充",
+    )
+    return any(marker in reply_draft for marker in placeholder_markers)
+
+
 def reply_generate_node(db: Session, state: CopilotState) -> CopilotState:
     fallback_draft = build_reply_draft(state)
     policy_context = "\n".join(
@@ -65,7 +105,13 @@ def reply_generate_node(db: Session, state: CopilotState) -> CopilotState:
         ),
         response_model=ReplyGenerationResult,
     )
-    state.reply_draft = result.value.reply_draft if result.success else fallback_draft
+    fallback_reason = result.call.fallback_reason
+    if result.success and not has_unresolved_placeholder(result.value.reply_draft):
+        state.reply_draft = result.value.reply_draft
+    else:
+        state.reply_draft = fallback_draft
+        if result.success:
+            fallback_reason = "LLM reply contains unresolved placeholder"
     step = record_agent_step(
         db,
         run_id=state.run_id,
@@ -78,7 +124,7 @@ def reply_generate_node(db: Session, state: CopilotState) -> CopilotState:
         llm_model=result.call.model,
         input_tokens=result.call.input_tokens,
         output_tokens=result.call.output_tokens,
-        fallback_reason=result.call.fallback_reason,
+        fallback_reason=fallback_reason,
         duration_override_ms=result.call.duration_ms,
     )
     state.steps.append(step)

@@ -1,7 +1,8 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 
-import { analyzeCopilot } from "./services/api";
-import type { CopilotAnalyzeResponse, SessionOrderMismatch } from "./services/api";
+import { startCopilotAnalysis } from "./services/api";
+import type { AgentStep, CopilotAnalyzeResponse, SessionOrderMismatch } from "./services/api";
+import { watchRunProgress } from "./runProgress";
 
 type ConversationMessage = {
   role: "user" | "assistant";
@@ -17,6 +18,9 @@ type CopilotAnalysisContextValue = {
   sessionOrderMismatch: SessionOrderMismatch | null;
   isAnalyzing: boolean;
   refreshToken: number;
+  activeRunId: string | null;
+  liveRunStatus: string | null;
+  liveSteps: AgentStep[];
   setDraft: (draft: string) => void;
   analyze: () => Promise<void>;
   startNewConversation: () => void;
@@ -67,6 +71,15 @@ export function CopilotAnalysisProvider({ children }: { children: React.ReactNod
   const [sessionOrderMismatch, setSessionOrderMismatch] = useState<SessionOrderMismatch | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [liveRunStatus, setLiveRunStatus] = useState<string | null>(null);
+  const [liveSteps, setLiveSteps] = useState<AgentStep[]>([]);
+  const progressCleanupRef = useRef<(() => void) | null>(null);
+
+  const stopProgressTracking = useCallback(() => {
+    progressCleanupRef.current?.();
+    progressCleanupRef.current = null;
+  }, []);
 
   const analyze = useCallback(async () => {
     const userMessage = draft.trim();
@@ -75,39 +88,81 @@ export function CopilotAnalysisProvider({ children }: { children: React.ReactNod
     setIsAnalyzing(true);
     setErrorMessage(null);
     setSessionOrderMismatch(null);
+    setActiveRunId(null);
+    setLiveRunStatus("running");
+    setLiveSteps([]);
+    stopProgressTracking();
     try {
-      const analysis = await analyzeCopilot({
+      const startResponse = await startCopilotAnalysis({
         session_id: sessionId,
         user_id: "客服A",
         user_message: userMessage,
         history: messages.slice(-8),
       });
-      setMessages((current) => [
-        ...current,
-        { role: "user", content: userMessage },
-        { role: "assistant", content: analysis.reply_draft },
-      ]);
-      setResult(analysis);
-      setDraft("");
-      setRefreshToken((current) => current + 1);
+
+      setActiveRunId(startResponse.run_id);
+      await new Promise<CopilotAnalyzeResponse>((resolve, reject) => {
+        progressCleanupRef.current = watchRunProgress(startResponse.run_id, {
+          onRunUpdate: (run) => {
+            setActiveRunId(run.run_id);
+            setLiveRunStatus(run.status);
+          },
+          onStepsUpdate: setLiveSteps,
+          onFinal: (analysis) => {
+            setMessages((current) => [
+              ...current,
+              { role: "user", content: userMessage },
+              { role: "assistant", content: analysis.reply_draft },
+            ]);
+            setResult(analysis);
+            setDraft("");
+            setRefreshToken((current) => current + 1);
+            setLiveRunStatus("success");
+            stopProgressTracking();
+            setIsAnalyzing(false);
+            resolve(analysis);
+          },
+          onError: (message) => {
+            setErrorMessage(message);
+            setLiveRunStatus("failed");
+            stopProgressTracking();
+            setIsAnalyzing(false);
+            reject(new Error(message));
+          },
+        });
+      });
     } catch (error) {
       const mismatch = getSessionOrderMismatch(error);
-      setSessionOrderMismatch(mismatch);
-      setErrorMessage(mismatch ? null : getAnalysisErrorMessage(error));
+      if (mismatch) {
+        setSessionOrderMismatch(mismatch);
+        setErrorMessage(null);
+        setLiveRunStatus(null);
+        setActiveRunId(null);
+        setLiveSteps([]);
+      } else if ((error as { response?: unknown }).response) {
+        setErrorMessage(getAnalysisErrorMessage(error));
+        setLiveRunStatus(null);
+        setActiveRunId(null);
+        setLiveSteps([]);
+      }
     } finally {
       setIsAnalyzing(false);
     }
-  }, [draft, isAnalyzing, messages, sessionId]);
+  }, [draft, isAnalyzing, messages, sessionId, stopProgressTracking]);
 
   const startNewConversation = useCallback(() => {
     if (isAnalyzing) return;
+    stopProgressTracking();
     setSessionId(makeSessionId());
     setMessages([]);
     if (sessionOrderMismatch === null) setDraft("");
     setResult(null);
     setErrorMessage(null);
     setSessionOrderMismatch(null);
-  }, [isAnalyzing, sessionOrderMismatch]);
+    setActiveRunId(null);
+    setLiveRunStatus(null);
+    setLiveSteps([]);
+  }, [isAnalyzing, sessionOrderMismatch, stopProgressTracking]);
 
   const value = useMemo(() => ({
     sessionId,
@@ -118,10 +173,13 @@ export function CopilotAnalysisProvider({ children }: { children: React.ReactNod
     sessionOrderMismatch,
     isAnalyzing,
     refreshToken,
+    activeRunId,
+    liveRunStatus,
+    liveSteps,
     setDraft,
     analyze,
     startNewConversation,
-  }), [analyze, draft, errorMessage, isAnalyzing, messages, refreshToken, result, sessionId, sessionOrderMismatch, startNewConversation]);
+  }), [activeRunId, analyze, draft, errorMessage, isAnalyzing, liveRunStatus, liveSteps, messages, refreshToken, result, sessionId, sessionOrderMismatch, startNewConversation]);
 
   return <CopilotAnalysisContext.Provider value={value}>{children}</CopilotAnalysisContext.Provider>;
 }

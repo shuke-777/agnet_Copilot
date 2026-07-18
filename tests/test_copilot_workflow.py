@@ -14,6 +14,7 @@ from models.business import TicketEvent
 from schemas.copilot import CopilotAnalyzeRequest
 from services.trace_service import finish_agent_run, start_agent_run
 from agents.state import CopilotState
+from agents.nodes.reply_generate_node import has_unresolved_placeholder
 from agents.workflow import build_copilot_graph, run_copilot_workflow
 from services.redis_service import RedisService, RedisStatus
 from services.session_memory_service import SessionContext
@@ -21,6 +22,11 @@ from schemas.copilot import CopilotHistoryMessage
 
 
 class TestCopilotWorkflow(unittest.TestCase):
+    def test_reply_placeholder_detection_flags_unfinished_llm_drafts(self) -> None:
+        self.assertTrue(has_unresolved_placeholder("您的订单已于【签收时间】签收。"))
+        self.assertTrue(has_unresolved_placeholder("您的订单已于[时间]签收。"))
+        self.assertFalse(has_unresolved_placeholder("您的订单物流状态正常，请您确认查收。"))
+
     def test_workflow_builds_langgraph_app(self) -> None:
         graph = build_copilot_graph()
         self.assertTrue(hasattr(graph, "invoke"))
@@ -46,6 +52,8 @@ class TestCopilotWorkflow(unittest.TestCase):
             self.assertEqual(state.order_id, "ORD-1001")
             self.assertTrue(state.is_abnormal)
             self.assertIsNotNone(state.ticket_id)
+            self.assertFalse(state.approval_required)
+            self.assertEqual(state.approval_status, "not_required")
             self.assertEqual(state.feishu_status, "disabled")
             self.assertGreaterEqual(len(state.retrieved_policies), 1)
             self.assertIn("物流超过 72 小时未更新", state.reply_draft)
@@ -65,6 +73,7 @@ class TestCopilotWorkflow(unittest.TestCase):
                     "policy_retrieval",
                     "policy_rerank",
                     "reply_generate",
+                    "approval_check",
                     "ticket_create",
                     "feishu_notify",
                 ],

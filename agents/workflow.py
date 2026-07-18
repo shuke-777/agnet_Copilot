@@ -5,6 +5,7 @@ from langgraph.graph import END, START, StateGraph
 from sqlalchemy.orm import Session
 
 from agents.nodes.abnormal_check_node import abnormal_check_node
+from agents.nodes.approval_check_node import approval_check_node
 from agents.nodes.feishu_notify_node import feishu_notify_node
 from agents.nodes.follow_up_check_node import follow_up_check_node
 from agents.nodes.intent_node import intent_node
@@ -37,6 +38,7 @@ WORKFLOW_NODES: tuple[WorkflowNode, ...] = (
     policy_retrieval_node,
     policy_rerank_node,
     reply_generate_node,
+    approval_check_node,
     ticket_create_node,
     feishu_notify_node,
 )

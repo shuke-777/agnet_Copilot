@@ -15,6 +15,7 @@ from services.dashboard_service import (
     get_ticket_stats,
 )
 from services.dashboard_cache_service import invalidate_dashboard_cache
+from services.risk_ranking_service import refresh_risk_rankings
 from services.ticket_transition_service import TicketTransitionError, apply_ticket_transition
 
 
@@ -414,6 +415,7 @@ def perform_ticket_action(
 
     db.commit()
     invalidate_dashboard_cache()
+    refresh_risk_rankings(db)
     return RedirectResponse(url=f"/admin/tickets/{ticket.ticket_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 

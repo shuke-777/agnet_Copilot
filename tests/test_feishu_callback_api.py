@@ -41,6 +41,25 @@ class TestFeishuCallbackApi(unittest.TestCase):
             },
         )
 
+    def create_approval_ticket(self) -> str:
+        response = self.client.post(
+            "/api/tickets",
+            json={
+                "ticket_type": "refund_approval",
+                "priority": "high",
+                "user_id": "USER-001",
+                "order_id": "ORD-1001",
+                "summary": "用户申请订单 ORD-1001 退款，需要人工审核。",
+                "suggested_action": "请审核是否允许为订单 ORD-1001 发起退款处理。",
+                "created_by": "agent",
+                "approval_required": True,
+                "approval_status": "pending",
+                "approval_reason": "退款涉及资金动作，需要人工审核",
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        return response.json()["ticket_id"]
+
     def test_callback_updates_ticket_and_records_both_events(self) -> None:
         response = self.callback("claim", "FEISHU-EVENT-001")
 
@@ -74,6 +93,35 @@ class TestFeishuCallbackApi(unittest.TestCase):
         self.assertEqual(resolve_response.json()["ticket"]["status"], "resolved")
         self.assertEqual(reopen_response.status_code, 200)
         self.assertEqual(reopen_response.json()["ticket"]["status"], "processing")
+
+    def test_callback_supports_approval_actions(self) -> None:
+        self.ticket_id = self.create_approval_ticket()
+        response = self.callback("approve", "FEISHU-APPROVAL-001", operator="主管A")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["ticket"]["approval_status"], "approved")
+        self.assertEqual(body["ticket"]["approval_decided_by"], "主管A")
+        self.assertEqual(body["ticket"]["status"], "processing")
+        self.assertEqual(body["ticket_event"]["event_type"], "feishu_approval_changed")
+        self.assertEqual(body["ticket_event"]["from_status"], "pending")
+        self.assertEqual(body["ticket_event"]["to_status"], "approved")
+        self.assertEqual(body["feishu_event"]["action"], "approve")
+
+    def test_callback_supports_reject_and_manual_confirm_approval_actions(self) -> None:
+        first_ticket_id = self.create_approval_ticket()
+        self.ticket_id = first_ticket_id
+        reject_response = self.callback("reject", "FEISHU-APPROVAL-002", operator="主管A")
+        self.assertEqual(reject_response.status_code, 200)
+        self.assertEqual(reject_response.json()["ticket"]["approval_status"], "rejected")
+        self.assertEqual(reject_response.json()["ticket"]["status"], "resolved")
+
+        second_ticket_id = self.create_approval_ticket()
+        self.ticket_id = second_ticket_id
+        manual_response = self.callback("manual_confirm", "FEISHU-APPROVAL-003", operator="主管B")
+        self.assertEqual(manual_response.status_code, 200)
+        self.assertEqual(manual_response.json()["ticket"]["approval_status"], "pending")
+        self.assertEqual(manual_response.json()["ticket"]["status"], "processing")
 
     def test_callback_is_idempotent_for_the_same_feishu_event_id(self) -> None:
         first_response = self.callback("claim", "FEISHU-EVENT-IDEMPOTENT-001")

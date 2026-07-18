@@ -9,6 +9,11 @@ if str(PROJECT_ROOT) not in sys.path:
 from fastapi.testclient import TestClient
 
 from api.main import app
+from models.agent_trace import AgentRun
+from models.business import Order, Ticket
+from models.database import SessionLocal
+from services.bootstrap import seed_demo_data
+from scripts.reset_demo_database import reset_demo_database
 
 
 class TestBusinessApi(unittest.TestCase):
@@ -34,6 +39,71 @@ class TestBusinessApi(unittest.TestCase):
         self.assertEqual(body["carrier"], "顺丰速运")
         self.assertTrue(body["is_abnormal"])
         self.assertIn("物流超过 72 小时未更新", body["last_event"])
+
+    def test_extended_demo_orders_cover_after_sales_scenarios(self) -> None:
+        expected_orders = {
+            "ORD-1003": ("宠物自动喂食器", "stalled", True),
+            "ORD-1004": ("人体工学升降桌", "not_shipped", False),
+            "ORD-1005": ("夏季防晒衣", "delivered", False),
+            "ORD-1006": ("旗舰款扫地机器人", "in_transit", False),
+            "ORD-1007": ("手机钢化膜", "in_transit", False),
+            "ORD-1008": ("真皮通勤双肩包", "delivered", False),
+            "ORD-1009": ("智能运动手表", "delivered", False),
+            "ORD-1010": ("母婴恒温水壶", "in_transit", False),
+            "ORD-1011": ("儿童学习平板", "not_shipped", False),
+            "ORD-1012": ("便携咖啡机", "in_transit", False),
+        }
+
+        for order_id, (product_name, logistics_status, is_abnormal) in expected_orders.items():
+            order_response = self.client.get(f"/api/orders/{order_id}")
+            self.assertEqual(order_response.status_code, 200)
+            self.assertEqual(order_response.json()["product_name"], product_name)
+
+            logistics_response = self.client.get(f"/api/logistics/{order_id}")
+            self.assertEqual(logistics_response.status_code, 200)
+            self.assertEqual(logistics_response.json()["status"], logistics_status)
+            self.assertEqual(logistics_response.json()["is_abnormal"], is_abnormal)
+
+    def test_seed_demo_data_is_idempotent_for_existing_databases(self) -> None:
+        with SessionLocal() as db:
+            seed_demo_data(db)
+            seed_demo_data(db)
+            order_count = db.query(Order).count()
+
+        self.assertEqual(order_count, 12)
+
+    def test_reset_demo_database_clears_history_and_reseeds_demo_orders(self) -> None:
+        with SessionLocal() as db:
+            db.add(
+                AgentRun(
+                    run_id="RUN-RESET-001",
+                    session_id="SESSION-RESET-001",
+                    user_id="USER-001",
+                    user_message="reset smoke",
+                    status="success",
+                )
+            )
+            db.add(
+                Ticket(
+                    ticket_id="TCK-RESET-001",
+                    ticket_type="logistics_delay",
+                    priority="high",
+                    status="todo",
+                    user_id="USER-001",
+                    order_id="ORD-1001",
+                    summary="reset smoke",
+                    suggested_action="reset smoke",
+                    created_by="agent",
+                )
+            )
+            db.commit()
+
+        reset_demo_database()
+
+        with SessionLocal() as db:
+            self.assertEqual(db.query(Order).count(), 12)
+            self.assertEqual(db.query(AgentRun).count(), 0)
+            self.assertEqual(db.query(Ticket).count(), 0)
 
     def test_get_unknown_order_returns_404(self) -> None:
         response = self.client.get("/api/orders/ORD-NOT-FOUND")

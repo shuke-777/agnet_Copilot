@@ -37,5 +37,6 @@ class AgentRunRead(BaseModel):
     intent: str | None
     status: str
     total_duration_ms: int | None
+    result_payload: str | None = None
     created_at: datetime
     finished_at: datetime | None

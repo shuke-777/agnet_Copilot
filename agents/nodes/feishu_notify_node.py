@@ -2,11 +2,81 @@ from sqlalchemy.orm import Session
 
 from agents.state import CopilotState
 from models.business import Ticket
-from services.feishu_service import build_feishu_ticket_message, send_feishu_text_notification
+from services.feishu_service import (
+    build_feishu_approval_card_payload,
+    build_feishu_approval_message,
+    build_feishu_ticket_message,
+    send_feishu_card_notification,
+    send_feishu_text_notification,
+)
 from services.trace_service import record_agent_step
 
 
 def feishu_notify_node(db: Session, state: CopilotState) -> CopilotState:
+    if state.approval_required and state.approval_status == "pending":
+        ticket = db.get(Ticket, state.ticket_id) if state.ticket_id else None
+        if state.order is None:
+            state.feishu_status = "failed"
+            step = record_agent_step(
+                db,
+                run_id=state.run_id,
+                step_name="feishu_notify",
+                step_type="webhook",
+                status="failed",
+                input_summary=state.order_id,
+                output_summary="飞书待审核通知上下文缺失",
+                error_message="Order not found",
+            )
+            state.steps.append(step)
+            return state
+
+        if ticket is not None:
+            payload = build_feishu_approval_card_payload(
+                ticket=ticket,
+                order=state.order,
+                applicant=ticket.created_by,
+                approval_reason=state.approval_reason,
+                suggested_action=ticket.suggested_action,
+            )
+            result = send_feishu_card_notification(payload)
+            state.feishu_status = result.status
+            step_status = "skipped" if result.status == "disabled" else result.status
+            step = record_agent_step(
+                db,
+                run_id=state.run_id,
+                step_name="feishu_notify",
+                step_type="webhook",
+                status=step_status,
+                input_summary=ticket.ticket_id,
+                output_summary=f"待审核卡片：{result.message}",
+                error_message=result.message if result.status == "failed" else None,
+            )
+            state.steps.append(step)
+            return state
+
+        message = build_feishu_approval_message(
+            order=state.order,
+            response_level="高",
+            applicant="agent",
+            approval_reason=state.approval_reason,
+            suggested_action=state.reply_draft or "请人工审核本次售后处理建议。",
+        )
+        result = send_feishu_text_notification(message)
+        state.feishu_status = result.status
+        step_status = "skipped" if result.status == "disabled" else result.status
+        step = record_agent_step(
+            db,
+            run_id=state.run_id,
+            step_name="feishu_notify",
+            step_type="webhook",
+            status=step_status,
+            input_summary=state.order.order_id,
+            output_summary=f"待审核通知：{result.message}",
+            error_message=result.message if result.status == "failed" else None,
+        )
+        state.steps.append(step)
+        return state
+
     if state.ticket_id is None:
         state.feishu_status = "skipped"
         step = record_agent_step(

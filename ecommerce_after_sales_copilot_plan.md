@@ -92,6 +92,7 @@ Recharts 或 ECharts
 ```text
 飞书 Webhook V1
 飞书交互卡片 + 回调 V2
+真实飞书公网回调后置：本地闭环完成后再配置自建应用回调、HTTPS 域名和 Cloudflare Tunnel
 ```
 
 部署：
@@ -552,6 +553,7 @@ M10.8 会话主工单绑定（计划中）：使用 SQLite 持久保存 `session
 ### M11：RabbitMQ 异步任务与可靠投递
 
 ```text
+当前阶段先不做 M11；RabbitMQ 后置到真实飞书回调跑通之后
 RabbitMQ 专门处理可靠异步任务，不与 Redis 的缓存、限流和排行榜职责重叠
 异步处理飞书通知重试、长耗时 LLM 重试、外部平台同步和失败工单告警
 定义任务消息、消费状态、有限重试、退避策略和死信队列
@@ -566,6 +568,38 @@ RabbitMQ 专门处理可靠异步任务，不与 Redis 的缓存、限流和排�
 使用 WebSocket 或 SSE 将 Copilot 执行进度、工单状态变化和异步任务结果推送到前端
 前端工作台展示 Agent Step 实时状态，工单详情无需手动刷新即可看到飞书回调和异步任务结果
 Redis Pub/Sub 可作为多实例事件分发能力；RabbitMQ 仍负责可靠任务投递
+```
+
+### M15：本地全链路验收与演示打磨
+
+```text
+当前优先执行 M15，目标是把本地项目打磨成 5-8 分钟可展示的简历项目闭环
+使用 docs/LOCAL_DEMO.md 的 12 条问题逐条验收 Copilot 工作台、工单中心、Agent Trace 和 Dashboard
+重点展示物流异常自动建单、正常物流不误建单、高金额退款人工审核、RAG 规则来源、Trace Waterfall 和风险看板
+新增 docs/DEMO_SCRIPT.md，记录演示顺序、讲解重点、测试输入、预期结果和本地飞书审核模拟方式
+验收中如果发现前端字段、RAG 召回、工单关联或审核状态不清晰，优先修影响演示理解的问题
+```
+
+### 最终交付材料
+
+```text
+M15 本地验收后，再集中整理 Docker Compose / README / 项目展示材料
+README 覆盖本地启动、环境变量、前后端入口、核心 API、演示流程、项目亮点和当前边界
+Docker Compose 完成前后端联合启动、浏览器验收和镜像构建验证
+项目展示材料重点说明业务闭环、LangGraph 编排、RAG、人工审核、飞书协同和 Agent 可观测性
+```
+
+### M13：部署与真实飞书公网联调（后置）
+
+```text
+当前本地阶段继续使用 POST /api/feishu/callback 通过 Postman / curl 模拟 approve、reject、manual_confirm 审核动作
+飞书真实卡片按钮点击依赖公网 HTTPS 回调地址，不作为本地功能验收阻塞项
+本地核心功能和最终交付材料完成后，再将后端部署到服务器或通过 Cloudflare Tunnel 暴露服务
+正式回调地址约定为 https://api.heyiweilai.top/api/feishu/callback
+飞书自建应用中配置该回调地址，并订阅 card.action.trigger
+后端适配飞书真实卡片回调 payload，复用现有工单审核和事件记录逻辑
+飞书 Webhook、App Secret、Verification Token 等密钥只写入 .env，不写入代码、文档或数据库
+真实飞书回调跑通后，再进入 RabbitMQ 可靠投递增强，处理通知重试、长耗时 LLM 重试和失败告警
 ```
 
 ## 项目亮点

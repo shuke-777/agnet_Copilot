@@ -1,5 +1,6 @@
 import sys
 import unittest
+import json
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -11,6 +12,7 @@ from fastapi.testclient import TestClient
 from api.main import app
 from models.database import SessionLocal
 from services.trace_service import finish_agent_run, record_agent_step, start_agent_run
+from api.agent_trace import stream_run_events
 
 
 class TestAgentTraceApi(unittest.TestCase):
@@ -119,6 +121,51 @@ class TestAgentTraceApi(unittest.TestCase):
 
         self.assertEqual(self.client.get(f"/api/runs?q={run_id}").json()[0]["run_id"], run_id)
         self.assertEqual(self.client.get("/api/runs?q=ORD-1001").json()[0]["run_id"], run_id)
+
+    def test_run_event_stream_emits_started_step_and_finished_events(self) -> None:
+        with SessionLocal() as db:
+            run = start_agent_run(
+                db,
+                session_id="SESSION-EVENT-001",
+                user_id="USER-001",
+                user_message="订单 ORD-1001 还没收到",
+                intent="logistics_delay",
+            )
+            record_agent_step(
+                db,
+                run_id=run.run_id,
+                step_name="intent_recognition",
+                step_type="agent",
+                status="success",
+                input_summary="订单未收到",
+                output_summary="识别物流异常意图",
+            )
+            run.result_payload = json.dumps(
+                {
+                    "run_id": run.run_id,
+                    "intent": "logistics_delay",
+                    "order_id": "ORD-1001",
+                    "is_abnormal": True,
+                    "reply_draft": "已生成建议。",
+                    "ticket_created": False,
+                    "ticket_reused": False,
+                    "ticket_association": "none",
+                    "ticket_id": None,
+                    "approval_required": False,
+                    "approval_status": "not_required",
+                    "approval_reason": "物流催办不涉及资金、库存或权益变更",
+                    "feishu_status": "skipped",
+                    "policy_sources": [],
+                },
+                ensure_ascii=False,
+            )
+            finish_agent_run(db, run_id=run.run_id, status="success")
+
+        events = list(stream_run_events(run.run_id))
+        self.assertIn("event: run_started", events[0])
+        self.assertIn("event: step_created", events[1])
+        self.assertIn("event: run_finished", events[-1])
+        self.assertIn(run.run_id, events[0])
 
     def test_demo_waterfall_run_has_proportional_step_durations(self) -> None:
         response = self.client.post("/api/runs/demo-waterfall")

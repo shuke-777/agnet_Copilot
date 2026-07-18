@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from api.main import app
+from agents.nodes.intent_node import normalize_intent
 from models.agent_trace import AgentRun, AgentStep
 from models.business import Logistics, Order, SessionTicketBinding, Ticket
 from models.database import SessionLocal
@@ -21,6 +22,29 @@ from services.session_memory_service import SessionContext
 class TestCopilotAnalyzeApi(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
+
+    def test_analyze_start_creates_running_run_before_background_execution(self) -> None:
+        with patch("api.copilot.run_after_sales_issue_background"), patch.dict("os.environ", {"FEISHU_WEBHOOK_URL": ""}):
+            response = self.client.post(
+                "/api/copilot/analyze/start",
+                json={
+                    "session_id": "SESSION-COPILOT-START-001",
+                    "user_id": "USER-001",
+                    "user_message": "我的订单 ORD-1001 怎么还没收到？帮我催一下物流。",
+                },
+            )
+
+        self.assertEqual(response.status_code, 202)
+        body = response.json()
+        self.assertEqual(body["status"], "running")
+        self.assertTrue(body["run_id"].startswith("RUN-"))
+        self.assertTrue(body["events_url"].endswith(f"/api/runs/{body['run_id']}/events"))
+
+        with SessionLocal() as db:
+            run = db.get(AgentRun, body["run_id"])
+            self.assertIsNotNone(run)
+            self.assertEqual(run.status, "running")
+            self.assertIsNone(run.result_payload)
 
     def test_analyze_creates_ticket_for_abnormal_logistics(self) -> None:
         with patch.dict("os.environ", {"FEISHU_WEBHOOK_URL": ""}):
@@ -42,6 +66,9 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
         self.assertEqual(body["ticket_association"], "created")
         self.assertIsNotNone(body["ticket_id"])
         self.assertEqual(body["feishu_status"], "disabled")
+        self.assertFalse(body["approval_required"])
+        self.assertEqual(body["approval_status"], "not_required")
+        self.assertEqual(body["approval_reason"], "物流催办不涉及资金、库存或权益变更")
         self.assertGreaterEqual(len(body["policy_sources"]), 1)
         self.assertEqual(body["policy_sources"][0]["source_id"], "logistics_delay_72h_sop")
         self.assertIn("物流超过 72 小时未更新", body["reply_draft"])
@@ -77,6 +104,7 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
                 "policy_retrieval",
                 "policy_rerank",
                 "reply_generate",
+                "approval_check",
                 "ticket_create",
                 "feishu_notify",
             ],
@@ -104,6 +132,7 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["order_id"], "ORD-1002")
+        self.assertEqual(body["intent"], "logistics_query")
         self.assertFalse(body["is_abnormal"])
         self.assertFalse(body["ticket_created"])
         self.assertEqual(body["ticket_association"], "none")
@@ -119,7 +148,61 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
         self.assertNotIn("ticket_create", step_names)
         self.assertIn("feishu_notify", step_names)
 
-    def test_analyze_uses_refund_policy_without_creating_logistics_ticket(self) -> None:
+    def test_extended_abnormal_logistics_demo_order_creates_ticket(self) -> None:
+        with patch.dict("os.environ", {"FEISHU_WEBHOOK_URL": ""}):
+            response = self.client.post(
+                "/api/copilot/analyze",
+                json={
+                    "session_id": "SESSION-COPILOT-ORD-1003",
+                    "user_id": "USER-003",
+                    "user_message": "订单 ORD-1003 物流 96 小时没更新，帮我催一下物流。",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["order_id"], "ORD-1003")
+        self.assertEqual(body["intent"], "logistics_delay")
+        self.assertTrue(body["is_abnormal"])
+        self.assertTrue(body["ticket_created"])
+        self.assertEqual(body["ticket_association"], "created")
+
+    def test_unshipped_and_normal_logistics_demo_orders_do_not_create_logistics_ticket(self) -> None:
+        cases = [
+            (
+                "ORD-1004",
+                "USER-004",
+                "订单 ORD-1004 已经付款了，什么时候发货？",
+                "shipping_timeliness",
+            ),
+            (
+                "ORD-1012",
+                "USER-012",
+                "订单 ORD-1012 帮我催一下物流，什么时候能到？",
+                "logistics_delay",
+            ),
+        ]
+
+        for order_id, user_id, user_message, expected_intent in cases:
+            with self.subTest(order_id=order_id):
+                response = self.client.post(
+                    "/api/copilot/analyze",
+                    json={
+                        "session_id": f"SESSION-COPILOT-{order_id}",
+                        "user_id": user_id,
+                        "user_message": user_message,
+                    },
+                )
+
+                self.assertEqual(response.status_code, 200)
+                body = response.json()
+                self.assertEqual(body["order_id"], order_id)
+                self.assertEqual(body["intent"], expected_intent)
+                self.assertFalse(body["ticket_created"])
+                self.assertEqual(body["ticket_association"], "none")
+                self.assertIsNone(body["ticket_id"])
+
+    def test_analyze_uses_refund_policy_and_creates_pending_approval_ticket(self) -> None:
         response = self.client.post(
             "/api/copilot/analyze",
             json={
@@ -132,9 +215,12 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["intent"], "refund")
-        self.assertFalse(body["ticket_created"])
-        self.assertEqual(body["ticket_association"], "none")
-        self.assertIsNone(body["ticket_id"])
+        self.assertTrue(body["ticket_created"])
+        self.assertEqual(body["ticket_association"], "created")
+        self.assertIsNotNone(body["ticket_id"])
+        self.assertTrue(body["approval_required"])
+        self.assertEqual(body["approval_status"], "pending")
+        self.assertIn("退款", body["approval_reason"])
         self.assertIn("退款咨询", body["reply_draft"])
         self.assertEqual(body["policy_sources"][0]["source_id"], "refund_processing_rule")
 
@@ -143,7 +229,59 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
         step_names = [step["step_name"] for step in steps_response.json()]
         self.assertIn("query_rewrite", step_names)
         self.assertIn("policy_rerank", step_names)
-        self.assertNotIn("ticket_create", step_names)
+        self.assertIn("approval_check", step_names)
+        self.assertIn("ticket_create", step_names)
+
+        ticket_response = self.client.get(f"/api/tickets/{body['ticket_id']}")
+        self.assertEqual(ticket_response.status_code, 200)
+        ticket = ticket_response.json()
+        self.assertEqual(ticket["ticket_type"], "refund_approval")
+        self.assertTrue(ticket["approval_required"])
+        self.assertEqual(ticket["approval_status"], "pending")
+
+    def test_extended_approval_demo_orders_create_pending_review_tickets(self) -> None:
+        cases = [
+            ("ORD-1006", "USER-006", "订单 ORD-1006 金额比较高，我想退款。", "refund", "high"),
+            ("ORD-1007", "USER-007", "订单 ORD-1007 我想仅退款。", "refund", "medium"),
+            ("ORD-1008", "USER-008", "订单 ORD-1008 我想退货。", "return", "high"),
+            ("ORD-1009", "USER-009", "订单 ORD-1009 我想换货。", "exchange", "high"),
+            ("ORD-1010", "USER-010", "订单 ORD-1010 已经发货了，我想改地址。", "address_change", "medium"),
+            ("ORD-1011", "USER-011", "订单 ORD-1011 我想取消订单。", "cancel_order", "high"),
+        ]
+
+        for order_id, user_id, user_message, expected_intent, expected_priority in cases:
+            with self.subTest(order_id=order_id):
+                response = self.client.post(
+                    "/api/copilot/analyze",
+                    json={
+                        "session_id": f"SESSION-COPILOT-APPROVAL-{order_id}",
+                        "user_id": user_id,
+                        "user_message": user_message,
+                    },
+                )
+
+                self.assertEqual(response.status_code, 200)
+                body = response.json()
+                self.assertEqual(body["order_id"], order_id)
+                self.assertEqual(body["intent"], expected_intent)
+                self.assertTrue(body["ticket_created"])
+                self.assertTrue(body["approval_required"])
+                self.assertEqual(body["approval_status"], "pending")
+
+                ticket_response = self.client.get(f"/api/tickets/{body['ticket_id']}")
+                self.assertEqual(ticket_response.status_code, 200)
+                ticket = ticket_response.json()
+                self.assertEqual(ticket["priority"], expected_priority)
+                self.assertTrue(ticket["approval_required"])
+                self.assertEqual(ticket["approval_status"], "pending")
+
+    def test_llm_intent_bias_does_not_break_logistics_delay_demo(self) -> None:
+        intent = normalize_intent(
+            "shipping_timeliness",
+            "我的订单 ORD-1001 怎么还没收到？帮我催一下物流。",
+        )
+
+        self.assertEqual(intent, "logistics_delay")
 
     def test_analyze_returns_200_when_feishu_webhook_fails(self) -> None:
         with patch.dict("os.environ", {"FEISHU_WEBHOOK_URL": "https://example.invalid/webhook"}):
@@ -540,17 +678,17 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
             db.add_all(
                 [
                     Order(
-                        order_id="ORD-1003",
-                        user_id="USER-003",
+                        order_id="ORD-1999",
+                        user_id="USER-1999",
                         product_name="待发货测试商品",
                         amount=49.0,
                         status="paid",
                     ),
                     Logistics(
-                        logistics_id="LOG-1003",
-                        order_id="ORD-1003",
+                        logistics_id="LOG-1999",
+                        order_id="ORD-1999",
                         carrier="测试快递",
-                        tracking_no="TEST1003",
+                        tracking_no="TEST1999",
                         status="stalled",
                         last_event="测试异常物流事件",
                         last_event_time=datetime(2026, 7, 17, 12, 0, 0),
@@ -564,8 +702,8 @@ class TestCopilotAnalyzeApi(unittest.TestCase):
             "/api/copilot/analyze",
             json={
                 "session_id": "SESSION-COPILOT-UNSHIPPED",
-                "user_id": "USER-003",
-                "user_message": "订单 ORD-1003 的物流异常，帮我催一下。",
+                "user_id": "USER-1999",
+                "user_message": "订单 ORD-1999 的物流异常，帮我催一下。",
             },
         )
 

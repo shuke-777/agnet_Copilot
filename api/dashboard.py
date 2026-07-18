@@ -2,13 +2,14 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from models.database import get_db
-from schemas.dashboard import AgentPerformance, DashboardOverview, TicketStats
+from schemas.dashboard import AgentPerformance, DashboardOverview, RiskRanking, TicketStats
 from services.dashboard_service import (
     get_agent_performance,
     get_dashboard_overview,
     get_ticket_stats,
 )
 from services.dashboard_cache_service import DashboardCache
+from services.risk_ranking_service import RiskRankingService
 
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -27,3 +28,8 @@ def dashboard_ticket_stats(db: Session = Depends(get_db)) -> TicketStats:
 @router.get("/agent-performance", response_model=AgentPerformance)
 def dashboard_agent_performance(db: Session = Depends(get_db)) -> AgentPerformance:
     return DashboardCache.from_environment().get_or_load_agent_performance(lambda: get_agent_performance(db))
+
+
+@router.get("/risk-ranking", response_model=RiskRanking)
+def dashboard_risk_ranking(db: Session = Depends(get_db)) -> RiskRanking:
+    return RiskRankingService.from_environment().get_rankings(db)

@@ -3,8 +3,8 @@
 ## 项目状态
 
 - 项目定位：电商售后客服 Copilot
-- 当前阶段：M10 Redis 缓存、限流与运营风险榜
-- 当前里程碑：M8.6 已完成；M9 已完成，Docker Compose 联合验收延后至最终交付
+- 当前阶段：M15 本地全链路验收与演示打磨
+- 当前里程碑：M14 已完成；M11 RabbitMQ 后置，下一步先完成本地演示闭环、最终交付材料、Cloudflare Tunnel / 域名公网访问和真实飞书回调
 
 ## 已完成
 
@@ -171,12 +171,55 @@
   - 会话只保存用户/助手文本和最近订单号；同一 `session_id` 的 `user_id` 不一致时不读取上下文，避免演示环境下的会话串扰。
   - 当前消息和前端 `history` 都缺少订单号时，LangGraph 会优先从 Redis 会话上下文补全；Redis 未配置、不可用或内容失效时，继续回退到数据库最近 Run。
   - 不缓存订单、物流、工单等完整业务对象；未来接入认证后将由 Token 解析身份，并在多商家场景增加 `tenant_id` 隔离。
+- M10.8 会话主工单绑定已完成：
+  - 新增 `session_ticket_bindings` 表和 `SessionTicketBindingService`，用 SQLite 持久保存会话、用户作用域、订单和主工单关系；Redis 不可用时仍可完成绑定和冲突判断。
+  - 工作流新增 `session_binding_check` 与 `follow_up_check` 节点：同会话跨订单返回 HTTP 409，本轮明确催办才触发物流催办建单逻辑。
+  - `ticket_association` 统一表达 `created`、`reused`、`session_linked`、`none` 四种结果；同会话同订单追问会关联活动主工单，不重复建单、不重复发送飞书新建通知。
+  - 退款、退货、运费、发货时效等非物流催办意图不会污染物流工单；前端工作台已展示四种关联状态和跨订单冲突提示。
+- M10.6 运营风险榜已完成：
+  - 新增 `GET /api/dashboard/risk-ranking`，返回异常物流承运商、待处理高优先级工单和高频售后问题三组榜单。
+  - Redis 可用时使用 Sorted Set 维护榜单；Redis 未配置、不可用或写入失败时自动从 SQLite 实时聚合，返回 `source = sqlite_fallback`。
+  - 工单创建、更新、状态流转、Copilot Run 完成、飞书回调和示范 Trace 创建后会 best-effort 刷新风险榜，不影响主业务请求。
+  - React 运营看板已新增“运营风险榜”区域，展示三组风险数据和 Redis / SQLite 数据来源。
+- M12 SSE 实时 Agent 链路已完成：
+  - 新增 `POST /api/copilot/analyze/start`，先返回 `run_id` 与 `events_url`，后台继续执行 Copilot 分析。
+  - 新增 `GET /api/runs/{run_id}/events`，通过 SSE 推送 `run_started`、`step_created`、`run_finished`、`run_failed` 和 `heartbeat`。
+  - `agent_runs.result_payload` 持久保存最终分析结果，Run 详情可在完成态回看完整回复与工单信息。
+  - React 工作台与 Run 详情页已接入实时进度展示，SSE 不可用时自动降级为数据库轮询。
+- 真实飞书链路 M1 人机审核规则已完成：
+  - LangGraph 新增 `approval_check` 节点，按“金额 / 权益动作优先审核”判断是否进入人工审核。
+  - 物流催办、查询进度默认 `approval_status = not_required`，继续走普通飞书工单通知。
+  - 退款、退货、补偿、重发、改地址、取消订单等诉求返回 `approval_required = true`、`approval_status = pending`，不自动执行高风险动作。
+  - 飞书文本消息区分普通工单通知和“售后处理待审核”通知，包含响应等级、订单 ID、申请时间、申请人、用户 ID、摘要/审核原因和建议动作。
+  - React 工作台已展示人工审核状态和审核原因。
+- 真实飞书链路 M2 交互卡片审核按钮已完成：
+  - `tickets` 增加审核字段：`approval_required`、`approval_status`、`approval_reason`、`approval_decided_by`、`approval_decided_at`，本地 SQLite 启动时会幂等补列。
+  - 退款、退货等高风险诉求会创建或复用待审核工单，保留 Agent 建议但不自动执行退款、补偿、重发等动作。
+  - 飞书待审核通知升级为 interactive card，包含响应等级、工单 ID、订单 ID、申请时间、申请人、审核原因、建议动作，以及 `通过`、`拒绝`、`转人工确认` 三个按钮。
+  - `POST /api/feishu/callback` 支持 `approve`、`reject`、`manual_confirm`，审核结果写入 `tickets`、`ticket_events` 和 `feishu_events`，重复 `event_id` 保持幂等。
+  - React 工单中心展示审核状态，工单详情展示审核原因、审核人和审核时间。
+- M14 演示用例与售后知识库扩展已完成：
+  - `seed_demo_data` 改为按订单与物流 ID 幂等补充，既保留既有本地数据，又能在老的 `app.db` 中自动补入新演示数据。
+  - 新增 `ORD-1003` 到 `ORD-1012`，覆盖物流停滞、未发货、签收争议、高金额退款、低金额仅退款、退货、换货、改地址、取消订单和正常催单等场景。
+  - RAG 售后知识库新增签收争议、未发货催发、高金额退款、仅退款边界、退货验收、换货、改地址、取消订单、补偿赔付和投诉升级规则。
+  - 审核工单优先级按订单金额区分：金额大于等于 500 的审核工单为 `high`，低金额审核工单为 `medium`。
+  - 新增 `docs/LOCAL_DEMO.md`，整理前后端启动方式、12 条可复制演示问题、预期结果、RAG 规则方向和本地飞书审核模拟方式。
+- M15 本地全链路验收与演示打磨已规划：
+  - 以 5-8 分钟面试演示为目标，优先展示物流异常建单、正常物流不建单、退款人工审核、RAG 来源、Agent Trace 和 Dashboard。
+  - 新增 `docs/DEMO_SCRIPT.md`，记录演示顺序、讲解重点、测试问题、飞书本地审核模拟和验收命令。
+- M15 演示打磨补充：
+  - 正常物流查询类问题会归一为 `logistics_query`，避免在演示中显示 `unknown`。
+  - 新增 `scripts/reset_demo_database.py`，演示前可手动重置干净的 12 条本地订单用例、清空历史工单和 Agent Run。
+  - React 前端正式展示界面已移除 `M8` / `M8.6` 等开发阶段编号，侧边栏和页面标签改为业务化演示文案。
+  - 本地全链路验收中修正真实 LLM 可能导致的演示意图偏差：明确催物流优先归一为 `logistics_delay`；换货、改地址、取消订单和补偿诉求使用独立意图，并召回对应审核规则。
 
 ## 下一步
 
-- M10.8：会话主工单绑定。用 SQLite 持久保存会话与活动工单关系；同用户、同订单的后续 Run 自动关联同一工单。催办判断改为订单/物流查询后的 `follow_up_requested` 业务信号，跨订单要求前端新建咨询，退款/退货/运费等新意图不污染物流工单。
-- M10.6：运营风险榜。完成 M10.8 后，使用 Redis Sorted Set 维护异常物流承运商风险、待处理高优先级工单和高频售后问题。
-- 最终交付：完成前后端 Docker Compose 联合启动、浏览器验收和镜像构建验证。
+- 当前优先级：M15 本地全链路验收与演示打磨 -> 最终 Docker Compose / README / 项目展示材料 -> Cloudflare Tunnel / 域名公网访问 -> 真实飞书卡片回调联调 -> M11 RabbitMQ 可靠投递。
+- 本地阶段继续使用 `POST /api/feishu/callback` 通过 Postman / curl 模拟 `approve`、`reject`、`manual_confirm` 审核动作；飞书真实卡片按钮点击暂不作为当前验收阻塞项。
+- 真实飞书公网联调后置：待本地核心功能稳定后，再将 `https://api.heyiweilai.top/api/feishu/callback` 配置到飞书自建应用，并订阅 `card.action.trigger`。
+- M11：RabbitMQ 异步任务与可靠投递明确后移到真实飞书回调跑通之后，再处理飞书通知重试、长耗时 LLM 重试和失败工单告警。
+- 最终交付材料：在真实飞书前先完成 README、Docker Compose 联合启动说明、演示脚本和项目展示材料收口。
 
 ## M8 约定
 

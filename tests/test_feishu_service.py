@@ -11,7 +11,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from models.business import Logistics, Order, Ticket
 from services.feishu_service import (
+    build_feishu_approval_card_payload,
+    build_feishu_approval_message,
     build_feishu_ticket_message,
+    send_feishu_card_notification,
     send_feishu_text_notification,
 )
 
@@ -60,6 +63,79 @@ class TestFeishuService(unittest.TestCase):
         self.assertIn("TCK-1001", message)
         self.assertIn("high", message)
         self.assertIn("用户反馈订单 ORD-1001 未收到", message)
+
+    def test_approval_message_marks_pending_review_reason(self) -> None:
+        order = Order(order_id="ORD-1001", user_id="USER-001", product_name="无线蓝牙耳机", amount=199.0, status="shipped")
+
+        message = build_feishu_approval_message(
+            order=order,
+            response_level="高",
+            applicant="agent",
+            approval_reason="退款涉及资金动作，需要人工审核",
+            suggested_action="请审核是否允许为订单 ORD-1001 发起退款处理。",
+        )
+
+        self.assertIn("【售后处理待审核】", message)
+        self.assertIn("响应等级：高", message)
+        self.assertIn("订单ID：ORD-1001", message)
+        self.assertIn("申请人：agent", message)
+        self.assertIn("退款涉及资金动作", message)
+
+    def test_approval_card_contains_buttons_and_ticket_context(self) -> None:
+        order = Order(order_id="ORD-1001", user_id="USER-001", product_name="无线蓝牙耳机", amount=199.0, status="shipped")
+        ticket = Ticket(
+            ticket_id="TCK-REVIEW-001",
+            ticket_type="refund_approval",
+            priority="high",
+            status="todo",
+            user_id="USER-001",
+            order_id="ORD-1001",
+            summary="用户申请订单 ORD-1001 退款，需要人工审核。",
+            suggested_action="请审核是否允许为订单 ORD-1001 发起退款处理。",
+            created_by="agent",
+            approval_required=True,
+            approval_status="pending",
+            approval_reason="退款涉及资金动作，需要人工审核",
+        )
+
+        payload = build_feishu_approval_card_payload(
+            ticket=ticket,
+            order=order,
+            applicant="agent",
+            approval_reason=ticket.approval_reason,
+            suggested_action=ticket.suggested_action,
+        )
+
+        self.assertEqual(payload["msg_type"], "interactive")
+        self.assertIn("售后处理待审核", str(payload))
+        self.assertIn("TCK-REVIEW-001", str(payload))
+        self.assertIn("approve", str(payload))
+        self.assertIn("reject", str(payload))
+        self.assertIn("manual_confirm", str(payload))
+
+    def test_send_card_uses_interactive_payload(self) -> None:
+        payload = {"msg_type": "interactive", "card": {"header": {"title": {"content": "测试"}}}}
+        with patch.dict(os.environ, {"FEISHU_WEBHOOK_URL": "https://example.invalid/webhook"}):
+            with patch("services.feishu_service.urlopen") as mocked_urlopen:
+                mocked_urlopen.return_value.__enter__.return_value.status = 200
+                result = send_feishu_card_notification(payload)
+
+        self.assertEqual(result.status, "success")
+        request = mocked_urlopen.call_args.args[0]
+        self.assertIn('"msg_type": "interactive"', request.data.decode("utf-8"))
+
+    def test_send_loads_project_env_when_process_env_is_missing(self) -> None:
+        def load_env() -> bool:
+            os.environ["FEISHU_WEBHOOK_URL"] = "https://example.invalid/webhook"
+            return True
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("services.feishu_service.load_project_environment", side_effect=load_env, create=True):
+                with patch("services.feishu_service.urlopen") as mocked_urlopen:
+                    mocked_urlopen.return_value.__enter__.return_value.status = 200
+                    result = send_feishu_text_notification("test message")
+
+        self.assertEqual(result.status, "success")
 
 
 if __name__ == "__main__":

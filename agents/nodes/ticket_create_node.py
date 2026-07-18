@@ -10,14 +10,21 @@ from services.trace_service import record_agent_step
 
 
 def ticket_create_node(db: Session, state: CopilotState) -> CopilotState:
-    if state.intent != "logistics_delay":
-        return state
+    if state.approval_required and state.approval_status == "pending":
+        return _create_or_reuse_approval_ticket(db, state)
 
-    if state.active_session_ticket is not None:
+    if state.active_session_ticket is not None and state.intent in (
+        "logistics_delay",
+        "logistics_query",
+        "shipping_timeliness",
+    ):
         ticket = state.active_session_ticket
         state.ticket_association = "session_linked"
         output_summary = f"session_linked:{ticket.ticket_id}"
         return _associate_ticket(db, state, ticket, output_summary)
+
+    if state.intent != "logistics_delay":
+        return state
 
     if (
         state.order is None
@@ -84,6 +91,70 @@ def ticket_create_node(db: Session, state: CopilotState) -> CopilotState:
         order_id=ticket.order_id,
         ticket_id=ticket.ticket_id,
     )
+    return _associate_ticket(db, state, ticket, output_summary)
+
+
+def _create_or_reuse_approval_ticket(db: Session, state: CopilotState) -> CopilotState:
+    if state.order is None:
+        return state
+
+    ticket_type = f"{state.intent or 'after_sales'}_approval"
+    priority = "high" if state.order.amount >= 500 else "medium"
+    ticket = db.scalar(
+        select(Ticket)
+        .where(
+            Ticket.order_id == state.order.order_id,
+            Ticket.ticket_type == ticket_type,
+            Ticket.approval_status == "pending",
+            Ticket.status.in_(("todo", "processing")),
+        )
+        .order_by(Ticket.created_at.asc())
+    )
+    if ticket is None:
+        ticket = Ticket(
+            ticket_id=make_id("TCK"),
+            ticket_type=ticket_type,
+            priority=priority,
+            status="todo",
+            user_id=state.order.user_id,
+            order_id=state.order.order_id,
+            source_run_id=state.run_id,
+            summary=f"用户针对订单 {state.order.order_id} 提出{state.intent or '售后'}诉求，需要人工审核。",
+            suggested_action=state.reply_draft or "请人工审核本次售后处理建议。",
+            assigned_to=None,
+            created_by="agent",
+            approval_required=True,
+            approval_status=state.approval_status,
+            approval_reason=state.approval_reason,
+        )
+        db.add(ticket)
+        db.flush()
+        state.ticket_created = True
+        state.ticket_association = "created"
+        output_summary = f"approval_created:{ticket.ticket_id}"
+    else:
+        now = utc_now()
+        db.add(
+            TicketEvent(
+                event_id=make_id("EVT"),
+                ticket_id=ticket.ticket_id,
+                event_type="copilot_approval_followup_analyzed",
+                operator="agent",
+                content=(
+                    f"Copilot 追加审核分析：run_id={state.run_id}；"
+                    f"用户问题={state.payload.user_message}；"
+                    f"建议={state.reply_draft or '已生成售后审核建议'}"
+                ),
+                from_status=ticket.approval_status,
+                to_status=ticket.approval_status,
+                created_at=now,
+            )
+        )
+        ticket.updated_at = now
+        state.ticket_reused = True
+        state.ticket_association = "reused"
+        output_summary = f"approval_reused:{ticket.ticket_id}"
+
     return _associate_ticket(db, state, ticket, output_summary)
 
 

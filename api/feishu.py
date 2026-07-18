@@ -15,11 +15,19 @@ from schemas.business import (
     TicketEventRead,
     TicketRead,
 )
-from services.ticket_transition_service import TicketTransitionError, apply_ticket_transition
+from services.ticket_transition_service import (
+    TicketTransitionError,
+    apply_ticket_approval,
+    apply_ticket_transition,
+)
 from services.dashboard_cache_service import invalidate_dashboard_cache
+from services.risk_ranking_service import refresh_risk_rankings
 
 
 router = APIRouter(prefix="/api/feishu", tags=["feishu"])
+
+
+APPROVAL_ACTIONS = {"approve", "reject", "manual_confirm"}
 
 
 @router.post("/callback", response_model=FeishuCallbackResponse)
@@ -44,7 +52,7 @@ def handle_callback(
             select(TicketEvent)
             .where(
                 TicketEvent.ticket_id == existing_event.ticket_id,
-                TicketEvent.event_type == "feishu_status_changed",
+                TicketEvent.event_type.in_(("feishu_status_changed", "feishu_approval_changed")),
                 TicketEvent.operator == existing_event.operator,
                 TicketEvent.from_status == existing_event.from_status,
                 TicketEvent.to_status == existing_event.to_status,
@@ -65,14 +73,24 @@ def handle_callback(
 
     ticket = get_ticket_or_404(db, payload.ticket_id)
     try:
-        ticket_event = apply_ticket_transition(
-            db,
-            ticket=ticket,
-            action=payload.action,
-            operator=payload.operator,
-            event_type="feishu_status_changed",
-            content_prefix="飞书按钮操作",
-        )
+        if payload.action in APPROVAL_ACTIONS:
+            ticket_event = apply_ticket_approval(
+                db,
+                ticket=ticket,
+                action=payload.action,
+                operator=payload.operator,
+                event_type="feishu_approval_changed",
+                content_prefix="飞书审核操作",
+            )
+        else:
+            ticket_event = apply_ticket_transition(
+                db,
+                ticket=ticket,
+                action=payload.action,
+                operator=payload.operator,
+                event_type="feishu_status_changed",
+                content_prefix="飞书按钮操作",
+            )
     except TicketTransitionError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -96,6 +114,7 @@ def handle_callback(
     db.refresh(ticket_event)
     db.refresh(feishu_event)
     invalidate_dashboard_cache()
+    refresh_risk_rankings(db)
 
     return {
         "ticket": get_ticket_or_404(db, ticket.ticket_id),

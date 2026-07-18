@@ -32,11 +32,11 @@ import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 import {
-  analyzeCopilot,
   applyTicketAction,
   getAgentPerformance,
   getAgentRun,
   getDashboardOverview,
+  getDashboardRiskRanking,
   getDashboardTicketStats,
   getLogistics,
   getOrder,
@@ -46,14 +46,16 @@ import {
   listTickets,
 } from "./services/api";
 import { CopilotAnalysisProvider, useCopilotAnalysis } from "./CopilotAnalysisContext";
+import { sortAgentSteps, watchRunProgress } from "./runProgress";
 import type {
   AgentPerformance,
   AgentRun,
   AgentStep,
-  CopilotAnalyzeResponse,
   DashboardOverview,
   Logistics,
   Order,
+  RiskRanking,
+  RiskRankingItem,
   Ticket,
   TicketAssociation,
   TicketStats,
@@ -78,7 +80,7 @@ function PageHeader({ title, description, extra }: { title: string; description:
         <Title level={2}>{title}</Title>
         <Text type="secondary">{description}</Text>
       </div>
-      {extra || <Tag color="blue">M8.6 业务关联</Tag>}
+      {extra || <Tag color="blue">实时协同</Tag>}
     </div>
   );
 }
@@ -103,10 +105,13 @@ const ticketAssociationColors: Record<Exclude<TicketAssociation, "none">, string
 function WorkspacePage() {
   const {
     analyze,
+    activeRunId,
     draft,
     errorMessage,
     isAnalyzing,
     messages,
+    liveRunStatus,
+    liveSteps,
     result,
     sessionId,
     sessionOrderMismatch,
@@ -154,6 +159,43 @@ function WorkspacePage() {
           <Text type="secondary">当前会话：{sessionId}。系统只给出建议与创建结果，状态推进仍由人工确认。</Text>
         </article>
       </div>
+
+      {(isAnalyzing || activeRunId || liveSteps.length > 0) && (
+        <article className="analysis-progress" aria-label="实时链路">
+          <div className="analysis-progress-heading">
+            <Text className="panel-eyebrow">实时链路</Text>
+            <Tag color={liveRunStatus === "failed" ? "red" : liveRunStatus === "success" ? "green" : "processing"}>
+              {activeRunId ? `Run ${activeRunId}` : "等待启动"}
+            </Tag>
+          </div>
+          <Text type="secondary">
+            {liveRunStatus === "running"
+              ? "正在推进 Agent Step。"
+              : liveRunStatus === "success"
+                ? "分析已完成。"
+                : liveRunStatus === "failed"
+                  ? "分析失败。"
+                  : "等待实时事件。"}
+          </Text>
+          {liveSteps.length > 0 ? (
+            <div className="analysis-progress-list">
+              {liveSteps.map((step, index) => (
+                <div className="analysis-progress-item" key={step.step_id}>
+                  <Tag color={step.status === "failed" ? "red" : step.status === "skipped" ? "default" : "blue"}>
+                    {index + 1}
+                  </Tag>
+                  <div className="analysis-progress-item-body">
+                    <strong>{step.step_name}</strong>
+                    <Text type="secondary">{step.step_type} · {step.status} · {formatDuration(step.duration_ms)}</Text>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Text type="secondary">等待第一个步骤写入。</Text>
+          )}
+        </article>
+      )}
 
       {messages.length > 0 && (
         <article className="conversation-history" aria-label="当前咨询记录">
@@ -218,6 +260,12 @@ function WorkspacePage() {
                 </Space>
               ) : ticketAssociationLabel}
             </Descriptions.Item>
+            <Descriptions.Item label="人工审核">
+              <Space size={4}>
+                <Tag color={result.approval_required ? "gold" : "green"}>{result.approval_status}</Tag>
+                <Text type="secondary">{result.approval_reason}</Text>
+              </Space>
+            </Descriptions.Item>
             <Descriptions.Item label="飞书通知">{result.feishu_status}</Descriptions.Item>
           </Descriptions>
 
@@ -281,10 +329,6 @@ function StatusTag({ value }: { value: string }) {
 
 function formatDuration(duration: number | null | undefined) {
   return duration === null || duration === undefined ? "-" : `${duration} ms`;
-}
-
-function sortAgentSteps(steps: AgentStep[]) {
-  return [...steps].sort((left, right) => left.start_time.localeCompare(right.start_time));
 }
 
 function traceSegmentClass(step: AgentStep) {
@@ -404,6 +448,13 @@ function TicketsPage() {
     { title: "类型", dataIndex: "ticket_type" },
     { title: "优先级", dataIndex: "priority", render: (value: string) => <StatusTag value={value} /> },
     { title: "状态", dataIndex: "status", render: (value: string) => <StatusTag value={value} /> },
+    {
+      title: "审核",
+      dataIndex: "approval_status",
+      render: (value: string, record: Ticket) => (
+        record.approval_required ? <Tag color={value === "pending" ? "gold" : value === "approved" ? "green" : "red"}>{value}</Tag> : "-"
+      ),
+    },
     { title: "处理人", dataIndex: "assigned_to", render: (value: string | null) => value || "未分配" },
     { title: "摘要", dataIndex: "summary", ellipsis: true },
   ];
@@ -517,6 +568,18 @@ function TicketDetailPage() {
             <Descriptions.Item label="订单号">{ticket.order_id}</Descriptions.Item>
             <Descriptions.Item label="来源 Run">{ticket.source_run_id ? <Link to={`/runs/${ticket.source_run_id}`}>{ticket.source_run_id}</Link> : "人工创建，无关联 Run"}</Descriptions.Item>
             <Descriptions.Item label="处理人">{ticket.assigned_to || "未分配"}</Descriptions.Item>
+            <Descriptions.Item label="审核状态">
+              {ticket.approval_required ? (
+                <Space size={4}>
+                  <Tag color={ticket.approval_status === "pending" ? "gold" : ticket.approval_status === "approved" ? "green" : "red"}>
+                    {ticket.approval_status}
+                  </Tag>
+                  <Text type="secondary">{ticket.approval_reason || "需要人工审核"}</Text>
+                </Space>
+              ) : "不需要审核"}
+            </Descriptions.Item>
+            <Descriptions.Item label="审核人">{ticket.approval_decided_by || "-"}</Descriptions.Item>
+            <Descriptions.Item label="审核时间">{ticket.approval_decided_at ? new Date(ticket.approval_decided_at).toLocaleString("zh-CN") : "-"}</Descriptions.Item>
             <Descriptions.Item label="问题摘要" span={2}>{ticket.summary}</Descriptions.Item>
             <Descriptions.Item label="建议动作" span={2}>{ticket.suggested_action}</Descriptions.Item>
           </Descriptions>
@@ -652,6 +715,18 @@ function RunDetailPage() {
     };
   }, [runId]);
 
+  useEffect(() => {
+    if (!run || run.status !== "running") return undefined;
+
+    return watchRunProgress(runId, {
+      onRunUpdate: (nextRun) => setRun(nextRun),
+      onStepsUpdate: (nextSteps) => {
+        setSteps(nextSteps);
+        setSelectedStepId((current) => current ?? nextSteps[0]?.step_id ?? null);
+      },
+    });
+  }, [run, runId]);
+
   if (isLoading) {
     return <div className="analysis-loading" role="status"><Spin /><Text>正在加载 Agent 执行链路...</Text></div>;
   }
@@ -724,18 +799,20 @@ function DashboardPage() {
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [ticketStats, setTicketStats] = useState<TicketStats | null>(null);
   const [agentPerformance, setAgentPerformance] = useState<AgentPerformance | null>(null);
+  const [riskRanking, setRiskRanking] = useState<RiskRanking | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [hasPartialError, setHasPartialError] = useState(false);
 
   useEffect(() => {
     let isCurrent = true;
-    Promise.allSettled([getDashboardOverview(), getDashboardTicketStats(), getAgentPerformance()])
-      .then(([overviewResult, ticketStatsResult, agentPerformanceResult]) => {
+    Promise.allSettled([getDashboardOverview(), getDashboardTicketStats(), getAgentPerformance(), getDashboardRiskRanking()])
+      .then(([overviewResult, ticketStatsResult, agentPerformanceResult, riskRankingResult]) => {
         if (!isCurrent) return;
         if (overviewResult.status === "fulfilled") setOverview(overviewResult.value);
         if (ticketStatsResult.status === "fulfilled") setTicketStats(ticketStatsResult.value);
         if (agentPerformanceResult.status === "fulfilled") setAgentPerformance(agentPerformanceResult.value);
-        setHasPartialError([overviewResult, ticketStatsResult, agentPerformanceResult].some((result) => result.status === "rejected"));
+        if (riskRankingResult.status === "fulfilled") setRiskRanking(riskRankingResult.value);
+        setHasPartialError([overviewResult, ticketStatsResult, agentPerformanceResult, riskRankingResult].some((result) => result.status === "rejected"));
       })
       .finally(() => {
         if (isCurrent) setIsLoading(false);
@@ -780,6 +857,22 @@ function DashboardPage() {
             {ticketStats?.priority_counts.length ? <div className="dashboard-pie-layout"><ResponsiveContainer height={220} width="55%"><PieChart><Tooltip /><Pie data={ticketStats.priority_counts} dataKey="count" nameKey="key" innerRadius={52} outerRadius={82} paddingAngle={2}>{ticketStats.priority_counts.map((item, index) => <Cell fill={priorityColors[index % priorityColors.length]} key={item.key} />)}</Pie></PieChart></ResponsiveContainer><div className="dashboard-legend">{ticketStats.priority_counts.map((item, index) => <div key={item.key}><i style={{ background: priorityColors[index % priorityColors.length] }} />{item.key}<strong>{item.count}</strong></div>)}</div></div> : <DashboardEmpty text="暂无工单优先级数据。" />}
           </article>
         </div>
+        <article className="data-panel dashboard-risk-panel">
+          <div className="dashboard-performance-heading">
+            <div>
+              <Text className="panel-eyebrow">运营风险榜</Text>
+              <Text type="secondary">异常承运商、待处理高优先级工单和高频售后类型。</Text>
+            </div>
+            <Tag color={riskRanking?.source === "redis" ? "green" : "default"}>
+              {riskRanking?.source === "redis" ? "Redis Sorted Set" : "SQLite 兜底"}
+            </Tag>
+          </div>
+          <div className="risk-ranking-grid">
+            <RiskRankingColumn title="异常物流承运商" items={riskRanking?.carrier_risks ?? []} emptyText="暂无异常承运商数据。" />
+            <RiskRankingColumn title="待处理高优先级工单" items={riskRanking?.high_priority_tickets ?? []} emptyText="暂无待处理高优先级工单。" />
+            <RiskRankingColumn title="高频售后问题" items={riskRanking?.frequent_issue_risks ?? []} emptyText="暂无高频售后类型数据。" />
+          </div>
+        </article>
         <article className="data-panel dashboard-performance-panel">
           <div className="dashboard-performance-heading"><div><Text className="panel-eyebrow">Agent Step 性能</Text><Text type="secondary">平均 Run 耗时：{formatDuration(agentPerformance?.average_run_duration_ms)}</Text></div><Tag color={agentPerformance?.agent_run_success_rate === 1 ? "green" : "blue"}>运行成功率 {formatPercentage(agentPerformance?.agent_run_success_rate)}</Tag></div>
           <Table columns={stepColumns} dataSource={agentPerformance?.step_performance ?? []} pagination={false} rowKey="step_name" locale={{ emptyText: "暂无 Agent Step 性能数据。" }} size="middle" />
@@ -791,6 +884,27 @@ function DashboardPage() {
 
 function DashboardEmpty({ text }: { text: string }) {
   return <div className="dashboard-empty"><Text type="secondary">{text}</Text></div>;
+}
+
+function RiskRankingColumn({ title, items, emptyText }: { title: string; items: RiskRankingItem[]; emptyText: string }) {
+  return (
+    <div className="risk-ranking-column">
+      <Text strong>{title}</Text>
+      {items.length > 0 ? (
+        <div className="risk-ranking-list">
+          {items.slice(0, 5).map((item, index) => (
+            <div className="risk-ranking-row" key={`${title}-${item.key}`}>
+              <span className="risk-ranking-index">{index + 1}</span>
+              <span className="risk-ranking-key">{item.key}</span>
+              <Tag color={index === 0 ? "volcano" : "blue"}>{item.count}</Tag>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <Text type="secondary">{emptyText}</Text>
+      )}
+    </div>
+  );
 }
 
 function AppShell() {
@@ -812,7 +926,7 @@ function AppShell() {
         />
         <div className="sider-footer">
           <Badge status="processing" text="服务运行中" />
-          <Text type="secondary">M8 前端工作台</Text>
+          <Text type="secondary">本地演示环境</Text>
         </div>
       </Sider>
       <Layout>

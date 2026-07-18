@@ -25,6 +25,9 @@ export type CopilotAnalyzeResponse = {
   ticket_reused: boolean;
   ticket_association: TicketAssociation;
   ticket_id: string | null;
+  approval_required: boolean;
+  approval_status: "not_required" | "pending" | "approved" | "rejected";
+  approval_reason: string;
   feishu_status: string;
   policy_sources: PolicySource[];
 };
@@ -53,6 +56,11 @@ export type Ticket = {
   suggested_action: string;
   assigned_to: string | null;
   created_by: string;
+  approval_required: boolean;
+  approval_status: "not_required" | "pending" | "approved" | "rejected";
+  approval_reason: string | null;
+  approval_decided_by: string | null;
+  approval_decided_at: string | null;
   created_at: string;
   updated_at: string;
   events: TicketEvent[];
@@ -90,6 +98,7 @@ export type AgentRun = {
   intent: string | null;
   status: string;
   total_duration_ms: number | null;
+  result_payload?: string | null;
   created_at: string;
   finished_at: string | null;
 };
@@ -145,6 +154,19 @@ export type AgentPerformance = {
   step_performance: StepPerformance[];
 };
 
+export type RiskRankingItem = {
+  key: string;
+  score: number;
+  count: number;
+};
+
+export type RiskRanking = {
+  source: string;
+  carrier_risks: RiskRankingItem[];
+  high_priority_tickets: RiskRankingItem[];
+  frequent_issue_risks: RiskRankingItem[];
+};
+
 type AnalyzeCopilotInput = {
   session_id: string;
   user_id: string;
@@ -152,8 +174,19 @@ type AnalyzeCopilotInput = {
   history?: Array<{ role: "user" | "assistant"; content: string }>;
 };
 
+export type CopilotAnalyzeStartResponse = {
+  run_id: string;
+  status: string;
+  events_url: string;
+};
+
 export async function analyzeCopilot(input: AnalyzeCopilotInput): Promise<CopilotAnalyzeResponse> {
   const response = await axios.post<CopilotAnalyzeResponse>("/api/copilot/analyze", input);
+  return response.data;
+}
+
+export async function startCopilotAnalysis(input: AnalyzeCopilotInput): Promise<CopilotAnalyzeStartResponse> {
+  const response = await axios.post<CopilotAnalyzeStartResponse>("/api/copilot/analyze/start", input);
   return response.data;
 }
 
@@ -201,6 +234,11 @@ export async function listAgentSteps(runId: string): Promise<AgentStep[]> {
   return response.data;
 }
 
+export async function getAgentRunResult(runId: string): Promise<CopilotAnalyzeResponse> {
+  const response = await axios.get<CopilotAnalyzeResponse>(`/api/runs/${runId}/result`);
+  return response.data;
+}
+
 export async function getDashboardOverview(): Promise<DashboardOverview> {
   const response = await axios.get<DashboardOverview>("/api/dashboard/overview");
   return response.data;
@@ -213,5 +251,10 @@ export async function getDashboardTicketStats(): Promise<TicketStats> {
 
 export async function getAgentPerformance(): Promise<AgentPerformance> {
   const response = await axios.get<AgentPerformance>("/api/dashboard/agent-performance");
+  return response.data;
+}
+
+export async function getDashboardRiskRanking(): Promise<RiskRanking> {
+  const response = await axios.get<RiskRanking>("/api/dashboard/risk-ranking");
   return response.data;
 }

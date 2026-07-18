@@ -27,5 +27,14 @@ class CopilotAnalyzeResponse(BaseModel):
     ticket_reused: bool
     ticket_association: Literal["created", "reused", "session_linked", "none"]
     ticket_id: str | None
+    approval_required: bool
+    approval_status: Literal["not_required", "pending", "approved", "rejected"]
+    approval_reason: str
     feishu_status: str
     policy_sources: list[PolicySource] = Field(default_factory=list)
+
+
+class CopilotAnalyzeStartResponse(BaseModel):
+    run_id: str
+    status: str
+    events_url: str

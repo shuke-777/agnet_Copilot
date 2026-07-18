@@ -105,6 +105,7 @@ docker compose up --build
 
 - `ORD-1001`：物流异常，用于测试自动创建催物流工单。
 - `ORD-1002`：物流正常，用于测试不创建工单的流程。
+- `ORD-1003` 到 `ORD-1012`：覆盖物流停滞、未发货、签收争议、退款、仅退款、退货、换货、改地址、取消订单和正常催单等本地演示场景。完整问题清单见 [`docs/LOCAL_DEMO.md`](docs/LOCAL_DEMO.md)。
 
 ## 可选：接入真实 LLM
 
@@ -149,6 +150,8 @@ SESSION_CONTEXT_MAX_MESSAGES=10
 Redis 连通后，`POST /api/copilot/analyze` 默认按 `user_id` 采用令牌桶限制为每 60 秒 10 次；请求没有 `user_id` 时按客户端 IP 兜底。超限时接口返回 HTTP `429`、`Retry-After` 和可重试秒数，React 工作台会直接提示等待时间。Redis 未配置或不可用时，限流自动降级放行，避免影响本地开发。
 
 Redis 也会按 `session_id` 保存 Copilot 短期上下文，默认保留 30 分钟、最多 10 条消息。上下文只包含用户/助手文本和最近识别到的订单号；同一 `session_id` 但 `user_id` 不一致时不会读取已有上下文。订单、物流、工单等完整业务对象仍只从数据库按业务权限读取，不进入会话缓存。Redis 不可用时，系统继续使用前端传入的 `history` 和数据库最近 Run 作为订单号识别的降级来源。
+
+运营风险榜接口为 `GET /api/dashboard/risk-ranking`。Redis 可用时会使用 Sorted Set 维护三组榜单：异常物流承运商、待处理高优先级工单和高频售后问题；Redis 未配置或写入失败时，接口会从 SQLite 实时聚合并返回 `source = sqlite_fallback`。React 运营看板会展示这三组榜单，便于快速发现承运商异常、积压工单和高频售后类型。
 
 ## 演示流程
 
@@ -219,7 +222,7 @@ curl -s -X POST http://127.0.0.1:8001/api/feishu/callback \
 用户问题 -> query_rewrite -> FAISS 召回 -> deterministic 词法重排序 -> 回复草稿
 ```
 
-知识库位于 [`memory/policy_knowledge.py`](memory/policy_knowledge.py)，当前覆盖物流异常、正常物流、发货时效、退款、退货、运费和客服安抚话术。当前实现不依赖真实 LLM 或付费 embedding 服务，方便本地演示和自动化测试；数据量与召回要求提升后，可将向量存储替换为 Milvus、pgvector 或 Qdrant，并接入真实 embedding 与 reranker。
+知识库位于 [`memory/policy_knowledge.py`](memory/policy_knowledge.py)，当前覆盖物流异常、正常物流、签收争议、发货时效、退款、仅退款、退货、换货、改地址、取消订单、补偿赔付、投诉升级、运费和客服安抚话术。当前实现不依赖真实 LLM 或付费 embedding 服务，方便本地演示和自动化测试；数据量与召回要求提升后，可将向量存储替换为 Milvus、pgvector 或 Qdrant，并接入真实 embedding 与 reranker。
 
 可通过退款问题验证 RAG 不误建物流工单：
 
@@ -264,15 +267,28 @@ curl -s -X POST http://127.0.0.1:8001/api/copilot/analyze \
 
 测试覆盖健康检查、订单/物流/工单 API、Copilot LangGraph 工作流、RAG 检索与重排序、飞书通知与回调、后台人工状态流转、Dashboard API 等关键路径。
 
+## 重置本地演示数据
+
+如果 `data/app.db` 中历史测试工单和 Agent Run 太多，演示前可以重置为干净的 12 条本地订单用例：
+
+```bash
+/opt/anaconda3/envs/rag_910/bin/python scripts/reset_demo_database.py
+```
+
+该命令会清空当前 `DATABASE_URL` 指向的数据库并重新写入演示订单、物流数据；执行前请确认没有需要保留的本地调试数据。
+
 ## 项目文档
 
 - [协作规则](AGENTS.md)
 - [产品与技术规划](ecommerce_after_sales_copilot_plan.md)
 - [当前实施状态](docs/STATUS.md)
+- [本地演示用例](docs/LOCAL_DEMO.md)
+- [M15 演示脚本](docs/DEMO_SCRIPT.md)
 
 ## 当前边界与后续演进
 
 - 当前使用 SQLite 和本地演示数据，未连接真实电商平台。
 - 默认不调用真实飞书、LLM 或付费 embedding API；真实 LLM 仅在手动配置 Gateway 后启用。
-- 当前仅对物流异常自动建单；退款、退货等真实交易状态机待后续扩展。
+- 当前本地阶段使用 `POST /api/feishu/callback` 模拟飞书审核；真实飞书公网回调放到 Cloudflare Tunnel / 服务器部署之后联调。
+- M11 RabbitMQ 可靠投递后置到真实飞书回调跑通之后，用于通知重试、长耗时任务重试和失败告警。
 - 随着知识库规模增长，可将 FAISS 替换为 Milvus、pgvector 或 Qdrant，并接入真实 embedding 与 reranker。

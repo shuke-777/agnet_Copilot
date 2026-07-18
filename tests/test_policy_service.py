@@ -37,3 +37,43 @@ class TestPolicyService(unittest.TestCase):
         )
 
         self.assertEqual(policies, [])
+
+    def test_retrieves_signed_delivery_dispute_sop(self) -> None:
+        policies = retrieve_after_sales_policies(
+            query="物流显示签收，但是用户说订单未收到，可能是前台代收。",
+            is_abnormal=False,
+            limit=4,
+        )
+
+        source_ids = {policy.source_id for policy in policies}
+        self.assertIn("delivery_dispute_signed_sop", source_ids)
+
+    def test_retrieves_high_value_refund_approval_rule(self) -> None:
+        policies = retrieve_after_sales_policies(
+            query="高金额订单申请退款，需要人工审核。",
+            intent="refund",
+            is_abnormal=False,
+            limit=4,
+        )
+
+        source_ids = {policy.source_id for policy in policies}
+        self.assertIn("high_value_refund_approval_rule", source_ids)
+
+    def test_retrieves_exchange_address_cancel_and_compensation_rules(self) -> None:
+        scenarios = {
+            "用户想换货，需要确认库存和重发流程。": ("exchange", "exchange_processing_rule"),
+            "订单发货后用户要求改地址。": ("address_change", "address_change_risk_rule"),
+            "用户想取消订单，需要审核交易状态。": ("cancel_order", "order_cancel_approval_rule"),
+            "用户要求补偿和赔付，需要人工确认。": ("compensation", "compensation_approval_rule"),
+        }
+
+        for query, (intent, source_id) in scenarios.items():
+            with self.subTest(source_id=source_id):
+                policies = retrieve_after_sales_policies(
+                    query=query,
+                    intent=intent,
+                    is_abnormal=None,
+                    limit=5,
+                )
+                source_ids = {policy.source_id for policy in policies}
+                self.assertIn(source_id, source_ids)

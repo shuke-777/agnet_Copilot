@@ -18,6 +18,7 @@ from schemas.business import (
 )
 from services.ticket_transition_service import TicketTransitionError, apply_ticket_transition
 from services.dashboard_cache_service import invalidate_dashboard_cache
+from services.risk_ranking_service import refresh_risk_rankings
 
 
 router = APIRouter(prefix="/api", tags=["business"])
@@ -74,11 +75,15 @@ def create_ticket(payload: TicketCreate, db: Session = Depends(get_db)) -> Ticke
         suggested_action=payload.suggested_action,
         assigned_to=payload.assigned_to,
         created_by=payload.created_by,
+        approval_required=payload.approval_required,
+        approval_status=payload.approval_status,
+        approval_reason=payload.approval_reason,
     )
     db.add(ticket)
     db.commit()
     db.refresh(ticket)
     invalidate_dashboard_cache()
+    refresh_risk_rankings(db)
     return get_ticket_or_404(db, ticket.ticket_id)
 
 
@@ -120,6 +125,7 @@ def update_ticket(ticket_id: str, payload: TicketUpdate, db: Session = Depends(g
     db.commit()
     db.refresh(ticket)
     invalidate_dashboard_cache()
+    refresh_risk_rankings(db)
     return get_ticket_or_404(db, ticket.ticket_id)
 
 
@@ -144,6 +150,7 @@ def apply_ticket_action(
 
     db.commit()
     invalidate_dashboard_cache()
+    refresh_risk_rankings(db)
     return get_ticket_or_404(db, ticket.ticket_id)
 
 
@@ -172,4 +179,5 @@ def create_ticket_event(
     db.commit()
     db.refresh(event)
     invalidate_dashboard_cache()
+    refresh_risk_rankings(db)
     return event
