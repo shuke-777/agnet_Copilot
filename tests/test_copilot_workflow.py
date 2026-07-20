@@ -216,6 +216,70 @@ class TestCopilotWorkflow(unittest.TestCase):
         self.assertEqual(second_state.feishu_status, "skipped")
         self.assertEqual(send_notification.call_count, 1)
 
+    def test_approval_workflow_sends_review_card_with_app_bot(self) -> None:
+        payload = CopilotAnalyzeRequest(
+            session_id="SESSION-WORKFLOW-APP-BOT-001",
+            user_id="USER-006",
+            user_message="订单 ORD-1006 金额比较高，我想退款。",
+        )
+
+        with patch("agents.nodes.feishu_notify_node.send_feishu_app_bot_card_notification") as send_app_bot, patch(
+            "agents.nodes.feishu_notify_node.send_feishu_text_notification"
+        ) as send_text, patch.dict(
+            "os.environ",
+            {
+                "FEISHU_APP_ID": "cli_demo",
+                "FEISHU_APP_SECRET": "secret_demo",
+                "FEISHU_CHAT_ID": "oc_demo",
+            },
+        ), SessionLocal() as db:
+            send_app_bot.return_value.status = "success"
+            send_app_bot.return_value.message = "Feishu app bot card sent"
+            run = start_agent_run(db, session_id=payload.session_id, user_id=payload.user_id, user_message=payload.user_message)
+            state = run_copilot_workflow(db=db, payload=payload, run_id=run.run_id)
+
+        self.assertTrue(state.approval_required)
+        self.assertEqual(state.approval_status, "pending")
+        self.assertEqual(state.feishu_status, "success")
+        send_app_bot.assert_called_once()
+        send_text.assert_not_called()
+        self.assertEqual(state.steps[-1].step_name, "feishu_notify")
+        self.assertEqual(state.steps[-1].step_type, "feishu_app_bot")
+        self.assertIn("自建应用审核卡片", state.steps[-1].output_summary)
+
+    def test_approval_workflow_falls_back_to_webhook_text_when_app_bot_is_disabled(self) -> None:
+        payload = CopilotAnalyzeRequest(
+            session_id="SESSION-WORKFLOW-APP-BOT-DISABLED-001",
+            user_id="USER-006",
+            user_message="订单 ORD-1006 金额比较高，我想退款。",
+        )
+
+        with patch("agents.nodes.feishu_notify_node.send_feishu_app_bot_card_notification") as send_app_bot, patch(
+            "agents.nodes.feishu_notify_node.send_feishu_text_notification"
+        ) as send_text, patch.dict(
+            "os.environ",
+            {
+                "FEISHU_APP_ID": "",
+                "FEISHU_APP_SECRET": "",
+                "FEISHU_CHAT_ID": "",
+                "FEISHU_WEBHOOK_URL": "",
+            },
+        ), SessionLocal() as db:
+            send_app_bot.return_value.status = "disabled"
+            send_app_bot.return_value.message = "FEISHU_APP_ID, FEISHU_APP_SECRET, or FEISHU_CHAT_ID is not configured"
+            send_text.return_value.status = "disabled"
+            send_text.return_value.message = "FEISHU_WEBHOOK_URL is not configured"
+            run = start_agent_run(db, session_id=payload.session_id, user_id=payload.user_id, user_message=payload.user_message)
+            state = run_copilot_workflow(db=db, payload=payload, run_id=run.run_id)
+
+        self.assertTrue(state.approval_required)
+        self.assertEqual(state.feishu_status, "disabled")
+        send_app_bot.assert_called_once()
+        send_text.assert_called_once()
+        self.assertEqual(state.steps[-1].step_name, "feishu_notify")
+        self.assertEqual(state.steps[-1].step_type, "webhook")
+        self.assertIn("降级为 Webhook 待审核通知", state.steps[-1].output_summary)
+
     def test_abnormal_logistics_without_explicit_follow_up_does_not_create_ticket(self) -> None:
         payload = CopilotAnalyzeRequest(
             session_id="SESSION-NO-FOLLOWUP",

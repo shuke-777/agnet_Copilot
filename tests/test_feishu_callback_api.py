@@ -60,6 +60,19 @@ class TestFeishuCallbackApi(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         return response.json()["ticket_id"]
 
+    def test_callback_returns_challenge_for_feishu_url_verification(self) -> None:
+        response = self.client.post(
+            "/api/feishu/callback",
+            json={
+                "challenge": "FEISHU-URL-VERIFY-001",
+                "token": "demo-token",
+                "type": "url_verification",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"challenge": "FEISHU-URL-VERIFY-001"})
+
     def test_callback_updates_ticket_and_records_both_events(self) -> None:
         response = self.callback("claim", "FEISHU-EVENT-001")
 
@@ -107,6 +120,178 @@ class TestFeishuCallbackApi(unittest.TestCase):
         self.assertEqual(body["ticket_event"]["from_status"], "pending")
         self.assertEqual(body["ticket_event"]["to_status"], "approved")
         self.assertEqual(body["feishu_event"]["action"], "approve")
+
+    def test_callback_supports_real_feishu_card_action_payload(self) -> None:
+        self.ticket_id = self.create_approval_ticket()
+        response = self.client.post(
+            "/api/feishu/callback",
+            json={
+                "schema": "2.0",
+                "header": {
+                    "event_id": "FEISHU-REAL-CARD-001",
+                    "event_type": "card.action.trigger",
+                    "create_time": "1720000000000",
+                    "token": "demo-token",
+                },
+                "event": {
+                    "operator": {
+                        "open_id": "ou_demo_operator",
+                        "user_id": "user_demo_operator",
+                    },
+                    "action": {
+                        "tag": "button",
+                        "value": {
+                            "ticket_id": self.ticket_id,
+                            "action": "approve",
+                        },
+                    },
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(set(body.keys()), {"toast", "card"})
+        self.assertEqual(body["card"]["type"], "raw")
+        self.assertEqual(body["card"]["data"]["schema"], "2.0")
+        self.assertEqual(body["card"]["data"]["header"]["title"]["content"], "售后处理已通过")
+        self.assertIn("elements", body["card"]["data"]["body"])
+
+        ticket = self.client.get(f"/api/tickets/{self.ticket_id}").json()
+        self.assertEqual(ticket["approval_status"], "approved")
+        self.assertEqual(ticket["status"], "processing")
+        with SessionLocal() as db:
+            from models.feishu_event import FeishuEvent
+
+            event = db.get(FeishuEvent, "FEISHU-REAL-CARD-001")
+            self.assertIsNotNone(event)
+            self.assertEqual(event.action, "approve")
+            self.assertEqual(event.operator, "ou_demo_operator")
+            self.assertIn("card.action.trigger", event.payload)
+
+    def test_real_feishu_card_action_returns_updated_card_without_action_buttons(self) -> None:
+        self.ticket_id = self.create_approval_ticket()
+        response = self.client.post(
+            "/api/feishu/callback",
+            json={
+                "schema": "2.0",
+                "header": {
+                    "event_id": "FEISHU-REAL-CARD-UPDATED-001",
+                    "event_type": "card.action.trigger",
+                    "create_time": "1720000000000",
+                    "token": "demo-token",
+                },
+                "event": {
+                    "operator": {"open_id": "ou_demo_operator"},
+                    "action": {
+                        "tag": "button",
+                        "value": {
+                            "ticket_id": self.ticket_id,
+                            "action": "approve",
+                        },
+                    },
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["toast"]["type"], "success")
+        self.assertEqual(set(body.keys()), {"toast", "card"})
+        self.assertIn("审核通过", body["toast"]["content"])
+        self.assertEqual(body["card"]["type"], "raw")
+        self.assertEqual(body["card"]["data"]["schema"], "2.0")
+        self.assertEqual(body["card"]["data"]["header"]["title"]["content"], "售后处理已通过")
+        self.assertIn("elements", body["card"]["data"]["body"])
+        card_text = str(body["card"])
+        self.assertIn(self.ticket_id, card_text)
+        self.assertIn("ou_demo_operator", card_text)
+        self.assertNotIn('"action": "approve"', card_text)
+        self.assertNotIn('"action": "reject"', card_text)
+        self.assertNotIn('"action": "manual_confirm"', card_text)
+
+        ticket = self.client.get(f"/api/tickets/{self.ticket_id}").json()
+        self.assertEqual(ticket["approval_status"], "approved")
+        self.assertEqual(ticket["status"], "processing")
+
+    def test_real_feishu_card_action_is_idempotent_when_retry_uses_new_event_id(self) -> None:
+        self.ticket_id = self.create_approval_ticket()
+        first_payload = {
+            "schema": "2.0",
+            "header": {
+                "event_id": "FEISHU-REAL-CARD-RETRY-001",
+                "event_type": "card.action.trigger",
+                "create_time": "1720000000000",
+                "token": "demo-token",
+            },
+            "event": {
+                "operator": {"open_id": "ou_demo_operator"},
+                "action": {
+                    "tag": "button",
+                    "value": {
+                        "ticket_id": self.ticket_id,
+                        "action": "approve",
+                    },
+                },
+            },
+        }
+        retry_payload = {
+            **first_payload,
+            "header": {
+                **first_payload["header"],
+                "event_id": "FEISHU-REAL-CARD-RETRY-002",
+            },
+        }
+
+        first_response = self.client.post("/api/feishu/callback", json=first_payload)
+        retry_response = self.client.post("/api/feishu/callback", json=retry_payload)
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(retry_response.status_code, 200)
+        body = retry_response.json()
+        self.assertEqual(set(body.keys()), {"toast", "card"})
+        self.assertEqual(body["card"]["type"], "raw")
+        self.assertEqual(body["card"]["data"]["schema"], "2.0")
+        self.assertEqual(body["card"]["data"]["header"]["title"]["content"], "售后处理已通过")
+        self.assertNotIn('"action": "approve"', str(body["card"]))
+
+        ticket = self.client.get(f"/api/tickets/{self.ticket_id}").json()
+        self.assertEqual(ticket["approval_status"], "approved")
+
+    def test_callback_supports_stringified_feishu_action_value(self) -> None:
+        self.ticket_id = self.create_approval_ticket()
+        response = self.client.post(
+            "/api/feishu/callback",
+            json={
+                "uuid": "FEISHU-REAL-CARD-002",
+                "type": "event_callback",
+                "event": {
+                    "type": "card.action.trigger",
+                    "operator": {"user_id": "user_demo_operator"},
+                    "action": {
+                        "value": f'{{"ticket_id":"{self.ticket_id}","action":"reject"}}',
+                    },
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(set(body.keys()), {"toast", "card"})
+        self.assertEqual(body["card"]["type"], "raw")
+        self.assertEqual(body["card"]["data"]["schema"], "2.0")
+        self.assertEqual(body["card"]["data"]["header"]["title"]["content"], "售后处理已拒绝")
+        self.assertIn("elements", body["card"]["data"]["body"])
+
+        ticket = self.client.get(f"/api/tickets/{self.ticket_id}").json()
+        self.assertEqual(ticket["approval_status"], "rejected")
+        self.assertEqual(ticket["status"], "resolved")
+        with SessionLocal() as db:
+            from models.feishu_event import FeishuEvent
+
+            event = db.get(FeishuEvent, "FEISHU-REAL-CARD-002")
+            self.assertIsNotNone(event)
+            self.assertEqual(event.operator, "user_demo_operator")
 
     def test_callback_supports_reject_and_manual_confirm_approval_actions(self) -> None:
         first_ticket_id = self.create_approval_ticket()

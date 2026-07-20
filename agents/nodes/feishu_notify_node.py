@@ -6,7 +6,7 @@ from services.feishu_service import (
     build_feishu_approval_card_payload,
     build_feishu_approval_message,
     build_feishu_ticket_message,
-    send_feishu_card_notification,
+    send_feishu_app_bot_card_notification,
     send_feishu_text_notification,
 )
 from services.trace_service import record_agent_step
@@ -38,17 +38,41 @@ def feishu_notify_node(db: Session, state: CopilotState) -> CopilotState:
                 approval_reason=state.approval_reason,
                 suggested_action=ticket.suggested_action,
             )
-            result = send_feishu_card_notification(payload)
+            result = send_feishu_app_bot_card_notification(payload)
+            if result.status == "disabled":
+                message = build_feishu_approval_message(
+                    order=state.order,
+                    response_level="高" if ticket.priority == "high" else "普通",
+                    applicant=ticket.created_by,
+                    approval_reason=state.approval_reason or "涉及高风险售后动作，需要人工审核",
+                    suggested_action=ticket.suggested_action,
+                    requested_at=ticket.created_at,
+                )
+                result = send_feishu_text_notification(message)
+                state.feishu_status = result.status
+                step_status = "skipped" if result.status == "disabled" else result.status
+                step = record_agent_step(
+                    db,
+                    run_id=state.run_id,
+                    step_name="feishu_notify",
+                    step_type="webhook",
+                    status=step_status,
+                    input_summary=ticket.ticket_id,
+                    output_summary=f"降级为 Webhook 待审核通知：{result.message}",
+                    error_message=result.message if result.status == "failed" else None,
+                )
+                state.steps.append(step)
+                return state
+
             state.feishu_status = result.status
-            step_status = "skipped" if result.status == "disabled" else result.status
             step = record_agent_step(
                 db,
                 run_id=state.run_id,
                 step_name="feishu_notify",
-                step_type="webhook",
-                status=step_status,
+                step_type="feishu_app_bot",
+                status=result.status,
                 input_summary=ticket.ticket_id,
-                output_summary=f"待审核卡片：{result.message}",
+                output_summary=f"自建应用审核卡片：{result.message}",
                 error_message=result.message if result.status == "failed" else None,
             )
             state.steps.append(step)

@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import unittest
@@ -14,6 +15,7 @@ from services.feishu_service import (
     build_feishu_approval_card_payload,
     build_feishu_approval_message,
     build_feishu_ticket_message,
+    send_feishu_app_bot_card_notification,
     send_feishu_card_notification,
     send_feishu_text_notification,
 )
@@ -123,6 +125,73 @@ class TestFeishuService(unittest.TestCase):
         self.assertEqual(result.status, "success")
         request = mocked_urlopen.call_args.args[0]
         self.assertIn('"msg_type": "interactive"', request.data.decode("utf-8"))
+
+    def test_app_bot_card_returns_disabled_when_config_is_missing(self) -> None:
+        payload = {"msg_type": "interactive", "card": {"header": {"title": {"content": "测试"}}}}
+        with patch.dict(os.environ, {"FEISHU_APP_ID": "", "FEISHU_APP_SECRET": "", "FEISHU_CHAT_ID": ""}):
+            result = send_feishu_app_bot_card_notification(payload)
+
+        self.assertEqual(result.status, "disabled")
+        self.assertIn("FEISHU_APP_ID", result.message)
+
+    def test_app_bot_card_fetches_token_and_sends_message_to_chat(self) -> None:
+        payload = {"msg_type": "interactive", "card": {"header": {"title": {"content": "测试"}}}}
+
+        def fake_urlopen(request, timeout=3.0):
+            class FakeResponse:
+                status = 200
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    return None
+
+                def read(self):
+                    if "tenant_access_token" in request.full_url:
+                        return b'{"code":0,"msg":"ok","tenant_access_token":"tenant-token"}'
+                    return b'{"code":0,"msg":"success","data":{"message_id":"om_demo"}}'
+
+            return FakeResponse()
+
+        with patch.dict(
+            os.environ,
+            {
+                "FEISHU_APP_ID": "cli_demo",
+                "FEISHU_APP_SECRET": "secret_demo",
+                "FEISHU_CHAT_ID": "oc_demo",
+            },
+        ):
+            with patch("services.feishu_service.urlopen", side_effect=fake_urlopen) as mocked_urlopen:
+                result = send_feishu_app_bot_card_notification(payload)
+
+        self.assertEqual(result.status, "success")
+        token_request = mocked_urlopen.call_args_list[0].args[0]
+        message_request = mocked_urlopen.call_args_list[1].args[0]
+        self.assertIn("/auth/v3/tenant_access_token/internal", token_request.full_url)
+        self.assertIn("/im/v1/messages?receive_id_type=chat_id", message_request.full_url)
+        self.assertEqual(message_request.headers["Authorization"], "Bearer tenant-token")
+        message_body = json.loads(message_request.data.decode("utf-8"))
+        self.assertEqual(message_body["receive_id"], "oc_demo")
+        self.assertEqual(message_body["msg_type"], "interactive")
+        self.assertIn("测试", message_body["content"])
+
+    def test_app_bot_card_returns_failed_when_token_request_fails(self) -> None:
+        payload = {"msg_type": "interactive", "card": {"header": {"title": {"content": "测试"}}}}
+
+        with patch.dict(
+            os.environ,
+            {
+                "FEISHU_APP_ID": "cli_demo",
+                "FEISHU_APP_SECRET": "secret_demo",
+                "FEISHU_CHAT_ID": "oc_demo",
+            },
+        ):
+            with patch("services.feishu_service.urlopen", side_effect=URLError("token down")):
+                result = send_feishu_app_bot_card_notification(payload)
+
+        self.assertEqual(result.status, "failed")
+        self.assertIn("token down", result.message)
 
     def test_send_loads_project_env_when_process_env_is_missing(self) -> None:
         def load_env() -> bool:

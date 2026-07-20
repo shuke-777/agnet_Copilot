@@ -7,6 +7,7 @@ import {
   PlusOutlined,
   SendOutlined,
   RobotOutlined,
+  AuditOutlined,
 } from "@ant-design/icons";
 import {
   Alert,
@@ -23,6 +24,7 @@ import {
   Spin,
   Tag,
   Table,
+  Select,
   Timeline,
   Typography,
 } from "antd";
@@ -44,6 +46,7 @@ import {
   listAgentRuns,
   listAgentSteps,
   listTickets,
+  listOperationLogs,
 } from "./services/api";
 import { CopilotAnalysisProvider, useCopilotAnalysis } from "./CopilotAnalysisContext";
 import { sortAgentSteps, watchRunProgress } from "./runProgress";
@@ -59,6 +62,8 @@ import type {
   Ticket,
   TicketAssociation,
   TicketStats,
+  OperationLog,
+  OperationLogFilters,
 } from "./services/api";
 
 const { Header, Content, Sider } = Layout;
@@ -71,6 +76,7 @@ const navigationItems: NavigationItem[] = [
   { key: "/tickets", icon: <FileSearchOutlined />, label: <NavLink to="/tickets">工单中心</NavLink> },
   { key: "/runs", icon: <RobotOutlined />, label: <NavLink to="/runs">Agent 追踪</NavLink> },
   { key: "/dashboard", icon: <BarChartOutlined />, label: <NavLink to="/dashboard">运营看板</NavLink> },
+  { key: "/operation-logs", icon: <AuditOutlined />, label: <NavLink to="/operation-logs">操作日志</NavLink> },
 ];
 
 function PageHeader({ title, description, extra }: { title: string; description: string; extra?: React.ReactNode }) {
@@ -795,6 +801,74 @@ function RunDetailPage() {
   );
 }
 
+function OperationLogsPage() {
+  const [filters, setFilters] = useState<OperationLogFilters>({});
+  const [logs, setLogs] = useState<OperationLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setErrorMessage("");
+    listOperationLogs(filters)
+      .then((records) => {
+        if (active) setLogs(records);
+      })
+      .catch(() => {
+        if (active) setErrorMessage("操作日志暂时无法加载，请稍后重试。");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, [filters]);
+
+  const columns = [
+    { title: "时间", dataIndex: "created_at", width: 176, render: (value: string) => new Date(value).toLocaleString("zh-CN", { hour12: false }) },
+    { title: "操作人", dataIndex: "operator", width: 112, render: (value: string, record: OperationLog) => <span>{value}<br /><Text type="secondary">{record.operator_type}</Text></span> },
+    { title: "动作", dataIndex: "action", width: 170, render: (value: string) => <Text code>{value}</Text> },
+    { title: "对象", dataIndex: "target_type", width: 150, render: (value: string, record: OperationLog) => <span>{value}<br /><Text type="secondary">{record.target_id}</Text></span> },
+    { title: "状态", dataIndex: "status", width: 100, render: (value: string) => <Tag color={value === "success" ? "green" : value === "failed" ? "red" : "default"}>{value}</Tag> },
+    { title: "摘要", dataIndex: "summary", ellipsis: true },
+    { title: "关联", key: "links", width: 180, render: (_: unknown, record: OperationLog) => <Space direction="vertical" size={0}>{record.ticket_id && <Link to={`/tickets/${record.ticket_id}`}>{record.ticket_id}</Link>}{record.run_id && <Link to={`/runs/${record.run_id}`}>{record.run_id}</Link>}{record.order_id && <Text type="secondary">{record.order_id}</Text>}</Space> },
+  ];
+
+  const cleanFilters = (values: OperationLogFilters) => Object.fromEntries(
+    Object.entries(values).filter(([, value]) => Boolean(value && value.trim())),
+  ) as OperationLogFilters;
+
+  return (
+    <section>
+      <PageHeader title="操作日志" description="统一查看 Agent、人工客服与飞书协同产生的关键业务动作。" />
+      <article className="work-panel">
+        <Text className="panel-eyebrow">全局操作流水</Text>
+        <Form layout="inline" onFinish={(values) => setFilters(cleanFilters(values))} style={{ marginTop: 16, marginBottom: 16 }}>
+          <Form.Item name="operator"><Input aria-label="筛选操作人" placeholder="操作人" allowClear /></Form.Item>
+          <Form.Item name="action"><Input aria-label="筛选操作动作" placeholder="操作动作" allowClear /></Form.Item>
+          <Form.Item name="ticket_id"><Input aria-label="筛选工单 ID" placeholder="工单 ID" allowClear /></Form.Item>
+          <Form.Item name="run_id"><Input aria-label="筛选 Run ID" placeholder="Run ID" allowClear /></Form.Item>
+          <Form.Item name="order_id"><Input aria-label="筛选订单 ID" placeholder="订单 ID" allowClear /></Form.Item>
+          <Form.Item name="status"><Select aria-label="筛选状态" allowClear placeholder="状态" style={{ minWidth: 110 }} options={[{ value: "success", label: "success" }, { value: "failed", label: "failed" }, { value: "running", label: "running" }, { value: "duplicate", label: "duplicate" }]} /></Form.Item>
+          <Form.Item><Button htmlType="submit" type="primary">筛选</Button></Form.Item>
+          <Form.Item><Button onClick={() => setFilters({})}>重置</Button></Form.Item>
+        </Form>
+        {errorMessage && <Alert message={errorMessage} showIcon type="warning" />}
+        <Table<OperationLog>
+          columns={columns}
+          dataSource={logs}
+          loading={loading}
+          locale={{ emptyText: "暂无关键业务操作记录" }}
+          pagination={{ pageSize: 10, showSizeChanger: false }}
+          rowKey="log_id"
+          scroll={{ x: 1100 }}
+          size="middle"
+        />
+      </article>
+    </section>
+  );
+}
+
 function DashboardPage() {
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [ticketStats, setTicketStats] = useState<TicketStats | null>(null);
@@ -950,6 +1024,7 @@ function AppShell() {
             <Route path="/runs" element={<RunsPage />} />
             <Route path="/runs/:runId" element={<RunDetailPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/operation-logs" element={<OperationLogsPage />} />
             <Route path="*" element={<Navigate to="/workspace" replace />} />
           </Routes>
         </Content>

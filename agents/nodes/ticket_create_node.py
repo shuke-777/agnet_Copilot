@@ -7,6 +7,7 @@ from models.agent_trace import AgentRun
 from models.business import Ticket, TicketEvent, utc_now
 from services.session_ticket_binding_service import SessionTicketBindingService
 from services.trace_service import record_agent_step
+from services.operation_log_service import record_operation_log
 
 
 def ticket_create_node(db: Session, state: CopilotState) -> CopilotState:
@@ -59,6 +60,20 @@ def ticket_create_node(db: Session, state: CopilotState) -> CopilotState:
         )
         db.add(ticket)
         db.flush()
+        record_operation_log(
+            db,
+            operator="agent",
+            operator_type="agent",
+            action="ticket_created",
+            target_type="ticket",
+            target_id=ticket.ticket_id,
+            ticket_id=ticket.ticket_id,
+            run_id=state.run_id,
+            order_id=ticket.order_id,
+            source="copilot",
+            status="success",
+            summary="Copilot 创建物流异常工单。",
+        )
         state.ticket_created = True
         state.ticket_association = "created"
         output_summary = f"created:{ticket.ticket_id}"
@@ -81,6 +96,20 @@ def ticket_create_node(db: Session, state: CopilotState) -> CopilotState:
             )
         )
         ticket.updated_at = now
+        record_operation_log(
+            db,
+            operator="agent",
+            operator_type="agent",
+            action="ticket_reused",
+            target_type="ticket",
+            target_id=ticket.ticket_id,
+            ticket_id=ticket.ticket_id,
+            run_id=state.run_id,
+            order_id=ticket.order_id,
+            source="copilot",
+            status="success",
+            summary="Copilot 复用物流异常工单。",
+        )
         state.ticket_reused = True
         state.ticket_association = "reused"
         output_summary = f"reused:{ticket.ticket_id}"
@@ -129,6 +158,20 @@ def _create_or_reuse_approval_ticket(db: Session, state: CopilotState) -> Copilo
         )
         db.add(ticket)
         db.flush()
+        record_operation_log(
+            db,
+            operator="agent",
+            operator_type="agent",
+            action="ticket_created",
+            target_type="ticket",
+            target_id=ticket.ticket_id,
+            ticket_id=ticket.ticket_id,
+            run_id=state.run_id,
+            order_id=ticket.order_id,
+            source="copilot",
+            status="success",
+            summary="Copilot 创建待审核售后工单。",
+        )
         state.ticket_created = True
         state.ticket_association = "created"
         output_summary = f"approval_created:{ticket.ticket_id}"
@@ -151,6 +194,20 @@ def _create_or_reuse_approval_ticket(db: Session, state: CopilotState) -> Copilo
             )
         )
         ticket.updated_at = now
+        record_operation_log(
+            db,
+            operator="agent",
+            operator_type="agent",
+            action="ticket_reused",
+            target_type="ticket",
+            target_id=ticket.ticket_id,
+            ticket_id=ticket.ticket_id,
+            run_id=state.run_id,
+            order_id=ticket.order_id,
+            source="copilot",
+            status="success",
+            summary="Copilot 复用待审核售后工单。",
+        )
         state.ticket_reused = True
         state.ticket_association = "reused"
         output_summary = f"approval_reused:{ticket.ticket_id}"

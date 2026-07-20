@@ -14,6 +14,7 @@ from api.business import router as business_router
 from api.copilot import router as copilot_router
 from api.dashboard import router as dashboard_router
 from api.feishu import router as feishu_router
+from api.operation_logs import router as operation_logs_router
 from services.bootstrap import bootstrap_database
 from services.redis_service import RedisService
 
@@ -36,6 +37,7 @@ app.include_router(business_router)
 app.include_router(copilot_router)
 app.include_router(dashboard_router)
 app.include_router(feishu_router)
+app.include_router(operation_logs_router)
 
 
 @app.get("/health")

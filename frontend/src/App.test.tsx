@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axios from "axios";
 import { MemoryRouter } from "react-router-dom";
@@ -37,6 +37,29 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "工单中心" })).toBeInTheDocument();
     expect(screen.getByText("实时协同")).toBeInTheDocument();
     expect(screen.queryByText("M8.6 业务关联")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("link", { name: "操作日志" }));
+
+    expect(await screen.findByRole("heading", { name: "操作日志" })).toBeInTheDocument();
+    expect(screen.getByText("全局操作流水")).toBeInTheDocument();
+  });
+
+  it("filters operation logs by business correlation fields", async () => {
+    const user = userEvent.setup();
+    mockedAxios.get.mockResolvedValue({ data: [] });
+
+    render(<MemoryRouter initialEntries={["/operation-logs"]}><App /></MemoryRouter>);
+
+    expect(await screen.findByRole("heading", { name: "操作日志" })).toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: "筛选操作人" }), "客服A");
+    await user.type(screen.getByRole("textbox", { name: "筛选工单 ID" }), "TCK-1001");
+    await user.click(screen.getByRole("button", { name: /筛\s*选/ }));
+
+    await waitFor(() => {
+      expect(mockedAxios.get).toHaveBeenLastCalledWith("/api/operation-logs", {
+        params: { operator: "客服A", ticket_id: "TCK-1001" },
+      });
+    });
   });
 
   it("submits an after-sales question and renders the Copilot analysis result", async () => {

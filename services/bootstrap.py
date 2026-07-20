@@ -7,10 +7,12 @@ from models.agent_trace import AgentRun, AgentStep
 from models.business import Logistics, Order, SessionTicketBinding, Ticket
 from models.database import Base, engine
 from models.feishu_event import FeishuEvent
+from models.operation_log import OperationLog
 
 
 _TRACE_MODELS = (AgentRun, AgentStep)
 _FEISHU_MODELS = (FeishuEvent,)
+_OPERATION_LOG_MODELS = (OperationLog,)
 _SESSION_BINDING_MODELS = (SessionTicketBinding,)
 
 

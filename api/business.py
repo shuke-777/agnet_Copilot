@@ -19,6 +19,7 @@ from schemas.business import (
 from services.ticket_transition_service import TicketTransitionError, apply_ticket_transition
 from services.dashboard_cache_service import invalidate_dashboard_cache
 from services.risk_ranking_service import refresh_risk_rankings
+from services.operation_log_service import record_operation_log
 
 
 router = APIRouter(prefix="/api", tags=["business"])
@@ -80,6 +81,20 @@ def create_ticket(payload: TicketCreate, db: Session = Depends(get_db)) -> Ticke
         approval_reason=payload.approval_reason,
     )
     db.add(ticket)
+    record_operation_log(
+        db,
+        operator=payload.created_by,
+        operator_type="agent" if payload.created_by == "agent" else "human",
+        action="ticket_created",
+        target_type="ticket",
+        target_id=ticket.ticket_id,
+        ticket_id=ticket.ticket_id,
+        order_id=ticket.order_id,
+        source="business_api",
+        status="success",
+        summary=f"创建工单 {ticket.ticket_id}。",
+        after_data={"status": ticket.status, "priority": ticket.priority},
+    )
     db.commit()
     db.refresh(ticket)
     invalidate_dashboard_cache()
@@ -119,9 +134,25 @@ def get_ticket(ticket_id: str, db: Session = Depends(get_db)) -> Ticket:
 def update_ticket(ticket_id: str, payload: TicketUpdate, db: Session = Depends(get_db)) -> Ticket:
     ticket = get_ticket_or_404(db, ticket_id)
     updates = payload.model_dump(exclude_unset=True)
+    before_data = {field: getattr(ticket, field) for field in updates}
     for field, value in updates.items():
         setattr(ticket, field, value)
     ticket.updated_at = utc_now()
+    record_operation_log(
+        db,
+        operator="客服后台",
+        operator_type="human",
+        action="ticket_updated",
+        target_type="ticket",
+        target_id=ticket.ticket_id,
+        ticket_id=ticket.ticket_id,
+        order_id=ticket.order_id,
+        source="business_api",
+        status="success",
+        summary=f"更新工单 {ticket.ticket_id}。",
+        before_data=before_data,
+        after_data=updates,
+    )
     db.commit()
     db.refresh(ticket)
     invalidate_dashboard_cache()
@@ -136,6 +167,7 @@ def apply_ticket_action(
     db: Session = Depends(get_db),
 ) -> Ticket:
     ticket = get_ticket_or_404(db, ticket_id)
+    before_data = {"status": ticket.status, "assigned_to": ticket.assigned_to}
     try:
         apply_ticket_transition(
             db,
@@ -148,6 +180,21 @@ def apply_ticket_action(
     except TicketTransitionError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
+    record_operation_log(
+        db,
+        operator=payload.operator,
+        operator_type="human",
+        action="manual_status_changed",
+        target_type="ticket",
+        target_id=ticket.ticket_id,
+        ticket_id=ticket.ticket_id,
+        order_id=ticket.order_id,
+        source="admin",
+        status="success",
+        summary=f"{payload.operator} 对工单执行 {payload.action}。",
+        before_data=before_data,
+        after_data={"status": ticket.status, "assigned_to": ticket.assigned_to},
+    )
     db.commit()
     invalidate_dashboard_cache()
     refresh_risk_rankings(db)
@@ -176,6 +223,20 @@ def create_ticket_event(
     )
     db.add(event)
     ticket.updated_at = utc_now()
+    record_operation_log(
+        db,
+        operator=payload.operator,
+        operator_type="human",
+        action="ticket_event_created",
+        target_type="ticket_event",
+        target_id=event.event_id,
+        ticket_id=ticket.ticket_id,
+        order_id=ticket.order_id,
+        source="business_api",
+        status="success",
+        summary=f"为工单 {ticket.ticket_id} 新增事件 {payload.event_type}。",
+        after_data={"event_type": payload.event_type, "to_status": payload.to_status},
+    )
     db.commit()
     db.refresh(event)
     invalidate_dashboard_cache()

@@ -580,6 +580,17 @@ Redis Pub/Sub 可作为多实例事件分发能力；RabbitMQ 仍负责可靠任
 验收中如果发现前端字段、RAG 召回、工单关联或审核状态不清晰，优先修影响演示理解的问题
 ```
 
+### M16：操作日志 / 审计日志中心（已完成）
+
+```text
+新增 operation_logs 全局操作流水，统一记录 Agent 自动动作、人工客服操作、飞书回调与审核结果
+每条日志关联 operator、operator_type、action、target、ticket_id、run_id、order_id、source、status、summary 和前后关键数据
+数据库作为前端查询主数据源；同时按日期追加本地 JSONL 文件 logs/operation-YYYY-MM-DD.jsonl，便于本地排查与审计备份
+新增 GET /api/operation-logs，支持操作人、动作、对象、工单、Run、订单、状态和时间范围筛选
+React 新增 /operation-logs 页面，展示全局流水并跳转关联工单与 Agent Run
+日志不记录真实密钥、Webhook URL、App Secret、LLM API Key 或完整敏感外部 payload
+```
+
 ### 最终交付材料
 
 ```text
@@ -598,6 +609,8 @@ Docker Compose 完成前后端联合启动、浏览器验收和镜像构建验�
 正式回调地址约定为 https://api.heyiweilai.top/api/feishu/callback
 飞书自建应用中配置该回调地址，并订阅 card.action.trigger
 后端适配飞书真实卡片回调 payload，复用现有工单审核和事件记录逻辑
+当前已支持飞书 URL verification 的 challenge 回包，以及 card.action.trigger 真实事件中的 header.event_id、event.operator、event.action.value 解析
+旧的本地模拟 callback 格式继续保留，方便 Postman / curl 与真实飞书两种方式并行验收
 飞书 Webhook、App Secret、Verification Token 等密钥只写入 .env，不写入代码、文档或数据库
 真实飞书回调跑通后，再进入 RabbitMQ 可靠投递增强，处理通知重试、长耗时 LLM 重试和失败告警
 ```

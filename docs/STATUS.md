@@ -3,8 +3,8 @@
 ## 项目状态
 
 - 项目定位：电商售后客服 Copilot
-- 当前阶段：M15 本地全链路验收与演示打磨
-- 当前里程碑：M14 已完成；M11 RabbitMQ 后置，下一步先完成本地演示闭环、最终交付材料、Cloudflare Tunnel / 域名公网访问和真实飞书回调
+- 当前阶段：M16 操作日志 / 审计日志中心已完成
+- 当前里程碑：M16 已完成；M11 RabbitMQ 后置，下一步进行真实飞书公网回调联调
 
 ## 已完成
 
@@ -205,21 +205,46 @@
   - 审核工单优先级按订单金额区分：金额大于等于 500 的审核工单为 `high`，低金额审核工单为 `medium`。
   - 新增 `docs/LOCAL_DEMO.md`，整理前后端启动方式、12 条可复制演示问题、预期结果、RAG 规则方向和本地飞书审核模拟方式。
 - M15 本地全链路验收与演示打磨已规划：
-  - 以 5-8 分钟面试演示为目标，优先展示物流异常建单、正常物流不建单、退款人工审核、RAG 来源、Agent Trace 和 Dashboard。
+  - 以 5-8 分钟项目展示为目标，优先展示物流异常建单、正常物流不建单、退款人工审核、RAG 来源、Agent Trace 和 Dashboard。
   - 新增 `docs/DEMO_SCRIPT.md`，记录演示顺序、讲解重点、测试问题、飞书本地审核模拟和验收命令。
 - M15 演示打磨补充：
   - 正常物流查询类问题会归一为 `logistics_query`，避免在演示中显示 `unknown`。
   - 新增 `scripts/reset_demo_database.py`，演示前可手动重置干净的 12 条本地订单用例、清空历史工单和 Agent Run。
   - React 前端正式展示界面已移除 `M8` / `M8.6` 等开发阶段编号，侧边栏和页面标签改为业务化演示文案。
   - 本地全链路验收中修正真实 LLM 可能导致的演示意图偏差：明确催物流优先归一为 `logistics_delay`；换货、改地址、取消订单和补偿诉求使用独立意图，并召回对应审核规则。
+- 最终 Docker Compose / README / 项目展示材料已收口：
+  - README 已重写为项目级说明文档，覆盖项目定位、核心价值、系统能力、架构、启动、环境变量、演示路径、RAG、Agent 可观测性、API、测试、边界和演进路线。
+  - 新增 `docs/PROJECT_SHOWCASE.md`，集中说明业务价值、核心闭环、LangGraph 编排、RAG 设计、人工审核、Trace Waterfall、Redis 增强和展示路径。
+  - `docker-compose.yml` 已补充 LLM、Redis、RAG 缓存和会话相关环境变量透传，并为前后端服务增加 healthcheck。
+- M13 真实飞书公网回调联调进行中：
+  - 飞书 URL verification 已支持 `challenge` 回包，可用于自建应用回调地址校验。
+  - `POST /api/feishu/callback` 已兼容飞书真实 `card.action.trigger` 事件结构，可从 `header.event_id`、`event.operator` 和 `event.action.value` 中归一化出内部的 `event_id`、`ticket_id`、`action`、`operator`。
+  - 旧的 Postman / curl 本地模拟格式继续保留；真实飞书按钮点击和本地模拟都会复用同一套工单审核、状态流转、事件记录和幂等逻辑。
+- M13.2 飞书自建应用机器人审核卡片已接入：
+  - 普通物流异常工单继续使用 `FEISHU_WEBHOOK_URL` 发送群通知。
+  - 需要人工审核的退款、退货、补偿、重发、改地址、取消订单等工单，优先使用飞书自建应用机器人发送 interactive 审核卡片。
+  - 自建应用配置缺失时，审核通知降级为 Webhook 文本通知；外部发送失败只记录 `feishu_notify` failed step，不打断 Copilot 主流程。
+  - `.env.example` 已补充 `FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_CHAT_ID` 和 `FEISHU_CALLBACK_VERIFY_TOKEN` 占位变量，不写入真实密钥。
+- M13.3 飞书审核卡片状态回写已完成：
+  - 真实 `card.action.trigger` 回调处理完成后，会向飞书返回 `toast + card` 响应体，把原待审核卡片替换为已处理卡片。
+  - `通过`、`拒绝`、`转人工确认` 三类审核动作分别展示已通过、已拒绝、已转人工确认状态，并移除原卡片中的操作按钮。
+  - 真实飞书卡片回调已补充重试幂等：同一审核动作即使飞书使用新的 `event_id` 重试，也会返回已处理卡片而不是 HTTP 409。
+  - 真实飞书回调响应已与飞书新版卡片要求收口：`card.action.trigger` 只返回 `toast` 和 `card`，其中 `card` 使用 `type=raw`、`data.schema=2.0`、`data.body.elements`，不再混入本地调试用的 `ticket`、`ticket_event`、`feishu_event` 字段，避免飞书客户端报 `200672`。
+  - 本地 Postman / curl 简化 callback 仍返回原业务 JSON，方便继续查看 `ticket`、`ticket_event` 和 `feishu_event` 调试结果。
+- M16 操作日志 / 审计日志中心已完成：
+  - 新增 `operation_logs` 全局业务流水表，不替代工单事件、飞书事件或 Agent Step，而是提供跨工单、Run、订单的统一审计视图。
+  - Copilot 启动/完成/失败、Agent 建单/复用、后台人工建单与状态流转、飞书回调与审核结果均会记录操作人、动作、对象、关联 ID、来源、状态、摘要和关键前后数据。
+  - 每条数据库日志会 best-effort 同步追加到 `logs/operation-YYYY-MM-DD.jsonl`；文件写入失败只记录服务端错误，不阻断售后主流程。
+  - 新增 `GET /api/operation-logs`，支持按操作人、动作、对象、工单 ID、Run ID、订单 ID、状态和时间范围筛选。
+  - React 前端新增 `/operation-logs` 页面，支持筛选、状态查看以及跳转关联工单和 Agent Run。
 
 ## 下一步
 
-- 当前优先级：M15 本地全链路验收与演示打磨 -> 最终 Docker Compose / README / 项目展示材料 -> Cloudflare Tunnel / 域名公网访问 -> 真实飞书卡片回调联调 -> M11 RabbitMQ 可靠投递。
-- 本地阶段继续使用 `POST /api/feishu/callback` 通过 Postman / curl 模拟 `approve`、`reject`、`manual_confirm` 审核动作；飞书真实卡片按钮点击暂不作为当前验收阻塞项。
-- 真实飞书公网联调后置：待本地核心功能稳定后，再将 `https://api.heyiweilai.top/api/feishu/callback` 配置到飞书自建应用，并订阅 `card.action.trigger`。
+- 当前优先级：真实飞书自建应用卡片按钮点击与状态回写实测 -> README/展示材料按实际公网方式微调 -> M11 RabbitMQ 可靠投递。
+- 本地阶段仍可使用 `POST /api/feishu/callback` 通过 Postman / curl 模拟 `approve`、`reject`、`manual_confirm` 审核动作。
+- 真实飞书公网联调：自建应用需配置公网 HTTPS callback，并订阅 `card.action.trigger`；当前代码已完成真实 payload 适配、自建应用机器人发卡片和真实按钮回调后的卡片状态回写，下一步用飞书群卡片按钮实测。
 - M11：RabbitMQ 异步任务与可靠投递明确后移到真实飞书回调跑通之后，再处理飞书通知重试、长耗时 LLM 重试和失败工单告警。
-- 最终交付材料：在真实飞书前先完成 README、Docker Compose 联合启动说明、演示脚本和项目展示材料收口。
+- 最终交付材料已完成第一版；后续如果部署方式变化，再同步更新 README 和展示材料。
 
 ## M8 约定
 

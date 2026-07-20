@@ -1,69 +1,115 @@
 # 电商售后客服 Copilot
 
-面向电商客服团队的售后工单 Copilot。项目聚焦「订单未收到 / 物流异常 / 催物流」场景，将订单查询、物流判断、售后规则检索、客服回复草稿、工单协同和 Agent 可观测性串成可测试的闭环。
+面向电商售后客服场景的 Agent 工单系统。项目围绕「订单未收到 / 物流异常 / 催物流 / 退款审核」等高频售后问题，将订单查询、物流判断、售后规则检索、客服回复草稿、工单状态流转、人工审核、飞书协同和 Agent 执行链路追踪沉淀为一个可观测、可测试、可人工接管的业务闭环。
 
-> Agent 负责识别、查询、判断和建议；人工负责确认、处理和推进状态；系统负责记录全过程。
+> Agent 负责识别、查询、判断和建议；人工负责审核、确认和推进状态；系统负责记录全过程。
 
-## 功能概览
+## 核心价值
 
-- 基础业务：订单、物流、工单、工单事件的 RESTful API。
-- Copilot 工作流：使用 LangGraph 依次执行意图识别、订单提取、订单/物流查询、异常判断、回复生成和工单创建。
-- RAG 知识库：使用 LangChain + FAISS 检索物流、发货、退款、退货、运费和客服话术规则；当前使用本地 deterministic embedding，无需外部模型或 API Key。
-- 可观测性：记录每次 Agent Run 和每个 Step 的状态、输入输出摘要与耗时。
-- 协同处理：异常物流工单可发送飞书 Webhook 通知；飞书回调和后台页面共享工单状态机。
-- 客服后台：查看工单、处理状态流转、追踪 Agent Run，并通过运营看板查看工单与 Step 性能指标。
+- **业务闭环完整**：从用户售后问题进入 Copilot，到订单与物流查询、规则检索、回复生成、工单创建、人工处理和操作审计，形成端到端流程。
+- **Agent 可观测**：每次 Copilot Run 都会记录 Step 输入摘要、输出摘要、状态、耗时、模型元数据和缓存命中情况，前端用 Trace Waterfall 展示执行链路。
+- **RAG 有来源**：客服回复草稿会引用售后 SOP、审核规则和话术来源，避免只返回不可解释的生成内容。
+- **高风险动作可审核**：退款、退货、换货、改地址、取消订单、补偿等诉求进入人工审核；Agent 不直接执行资金、库存或履约动作。
+- **工程化可降级**：真实 LLM、Redis、飞书 Webhook 均为可选能力，未配置时系统仍能依靠确定性逻辑完成本地演示和自动化测试。
 
-## 架构
+## 系统能力
 
-```text
-客服问题
-  -> FastAPI /api/copilot/analyze
-  -> LangGraph 工作流
-     -> 订单与物流查询（SQLite）
-     -> RAG 检索与重排序（LangChain + FAISS）
-     -> 回复草稿与工单决策
-     -> 飞书 Webhook（可选）
-  -> SQLite：业务数据、工单事件、Agent Run / Step、飞书回调事件
-
-客服后台 /admin/tickets、/admin/runs、/admin/dashboard
-  -> FastAPI 服务端渲染页面与 Dashboard API
-```
-
-当前只有「物流异常」意图会自动创建催物流工单。退款、退货、运费、发货时效问题会基于知识库生成回复草稿，不会执行真实交易操作。
+| 模块 | 能力 |
+| --- | --- |
+| Copilot 工作台 | 输入售后问题，实时查看 Agent Step、识别意图、订单号、回复草稿、RAG 来源、工单和飞书状态 |
+| 订单与物流 | 查询本地演示订单和物流轨迹，判断物流是否异常、是否超时、是否签收争议 |
+| 工单中心 | 查看工单列表、详情、审核状态、事件时间线，支持接单、解决、重新打开和关联 Run 查询 |
+| Agent 追踪 | 查看 Run 列表、工单 ID、订单 ID、总耗时、Step 明细和 Trace Waterfall |
+| RAG 知识库 | 使用 LangChain + FAISS 检索售后 SOP、规则和话术，当前使用本地 deterministic embedding |
+| LLM Gateway | 支持 `disabled`、OpenAI-compatible、Ollama 三种模式；失败时自动降级到确定性逻辑 |
+| 飞书协同 | 支持 Webhook 通知、交互卡片消息结构和本地 callback 模拟审核 |
+| 运营看板 | 展示工单指标、Agent 性能、飞书通知成功率、风险榜和高频售后问题 |
+| 操作日志 | 统一检索 Agent、人工客服与飞书产生的关键业务流水，并跳转关联工单和 Run |
+| Redis 增强 | 可选启用限流、Dashboard 缓存、RAG 缓存、会话上下文和风险榜 |
 
 ## 技术栈
 
-`Python`、`FastAPI`、`SQLAlchemy`、`Pydantic`、`SQLite`、`LangGraph`、`LangChain`、`FAISS`、`pytest`、飞书 Webhook、`Docker Compose`。
+**后端**：Python、FastAPI、SQLAlchemy、Pydantic、SQLite、pytest
+**Agent / RAG**：LangGraph、LangChain、FAISS、可选 LLM Gateway
+**前端**：Vite、React、TypeScript、Ant Design、Recharts、Vitest
+**协同与缓存**：飞书 Webhook、Redis
+**部署**：Docker、Docker Compose、Nginx
+
+## 架构概览
+
+```text
+React 前端
+  ├─ /workspace  Copilot 工作台
+  ├─ /tickets    工单中心
+  ├─ /runs       Agent 追踪与 Trace Waterfall
+  ├─ /dashboard  运营看板
+  └─ /operation-logs 操作日志
+
+FastAPI 后端
+  ├─ 业务 API：订单、物流、工单、事件、Dashboard
+  ├─ Copilot API：同步分析、异步启动、SSE 实时事件
+  ├─ LangGraph：意图识别 -> 订单提取 -> 订单/物流查询 -> 异常判断
+  │             -> RAG 检索/重排序 -> 回复生成 -> 审核判断 -> 建单/复用 -> 飞书通知
+  ├─ RAG：LangChain Document -> deterministic embedding -> FAISS -> rerank
+  ├─ LLM Gateway：disabled / openai_compatible / ollama
+  └─ 可观测性：agent_runs、agent_steps、ticket_events、feishu_events、operation_logs
+
+SQLite
+  ├─ orders / logistics
+  ├─ tickets / ticket_events / feishu_events
+  ├─ agent_runs / agent_steps
+  ├─ session_ticket_bindings
+  └─ operation_logs
+
+Redis（可选）
+  ├─ 令牌桶限流
+  ├─ Dashboard 聚合缓存
+  ├─ RAG 中间结果缓存
+  ├─ 会话上下文
+  └─ 运营风险榜
+```
 
 ## 快速启动
 
-### 方式一：本地 Python 环境
+### 方式一：本地开发启动
 
-项目当前使用的 Conda 环境为 `rag_910`。在项目根目录运行：
+后端使用本机 `rag_910` 环境：
 
 ```bash
-/opt/anaconda3/envs/rag_910/bin/uvicorn api.main:app \
-  --host 127.0.0.1 \
-  --port 8001 \
-  --reload
+/opt/anaconda3/envs/rag_910/bin/python -m uvicorn api.main:app --host 127.0.0.1 --port 8001 --reload
 ```
 
-若通过 PyCharm 直接运行 [`api/main.py`](api/main.py)，文件内的启动入口同样会启动服务；日常开发仍建议使用上面的 Uvicorn 命令。
+前端：
 
-### 方式二：Docker Compose
+```bash
+cd frontend
+npm run dev
+```
 
-需要本机已经启动 Docker Desktop。在项目根目录运行：
+打开：
+
+```text
+http://127.0.0.1:5173/workspace
+```
+
+### 方式二：Docker Compose 启动
+
+确保 Docker Desktop 已启动，在项目根目录运行：
 
 ```bash
 docker compose up --build
 ```
 
-首次启动会构建后端与 React 前端镜像，并创建 `data/app.db`。`./data` 会挂载到容器内，因此重启容器不会丢失工单、Agent Run 与其他本地数据。浏览器访问前端后，Nginx 会将 `/api/*` 请求转发到 FastAPI 容器。
-
 后台运行：
 
 ```bash
 docker compose up --build -d
+```
+
+查看日志：
+
+```bash
+docker compose logs -f
 ```
 
 停止服务：
@@ -72,171 +118,189 @@ docker compose up --build -d
 docker compose down
 ```
 
-查看日志：
+Compose 会启动两个服务：
+
+| 服务 | 地址 | 说明 |
+| --- | --- | --- |
+| `copilot` | `http://127.0.0.1:8001` | FastAPI 后端 |
+| `frontend` | `http://127.0.0.1:5173` | Nginx 托管的 React 前端 |
+
+容器中的 SQLite 数据库挂载到本地 `./data/app.db`，重启容器不会丢失本地工单和 Agent Run。
+
+## 环境变量
+
+项目默认不调用真实模型、不发送真实飞书消息、不强依赖 Redis。需要启用外部能力时，在项目根目录创建 `.env`，可参考 [`.env.example`](.env.example)。
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `DATABASE_URL` | `sqlite:///./data/app.db` | SQLite 数据库地址 |
+| `LLM_PROVIDER` | `disabled` | 可选 `disabled`、`openai_compatible`、`ollama` |
+| `LLM_BASE_URL` | 空 | OpenAI-compatible 或 Ollama 服务地址 |
+| `LLM_API_KEY` | 空 | 模型服务密钥 |
+| `LLM_MODEL` | 空 | 模型名称 |
+| `FEISHU_WEBHOOK_URL` | 空 | 普通协同通知使用的飞书群自定义机器人 Webhook |
+| `FEISHU_APP_ID` | 空 | 飞书自建应用 App ID，用于发送审核交互卡片 |
+| `FEISHU_APP_SECRET` | 空 | 飞书自建应用 App Secret，只写入本地 `.env` |
+| `FEISHU_CHAT_ID` | 空 | 自建应用机器人所在群的 `chat_id` |
+| `FEISHU_CALLBACK_VERIFY_TOKEN` | 空 | 飞书回调校验 token，后续真实联调时启用 |
+| `REDIS_URL` | 空 | 配置后启用 Redis 限流、缓存、会话和风险榜 |
+| `COPILOT_RATE_LIMIT_CAPACITY` | `10` | Copilot 令牌桶容量 |
+| `COPILOT_RATE_LIMIT_WINDOW_SECONDS` | `60` | 限流窗口 |
+| `DASHBOARD_CACHE_TTL_SECONDS` | `60` | Dashboard 缓存 TTL |
+| `RAG_CACHE_TTL_SECONDS` | `300` | RAG 中间结果缓存 TTL |
+| `OPERATION_LOG_DIR` | `./logs` | 本地 JSONL 操作日志目录 |
+
+### 接入 OpenAI-compatible 服务
 
 ```bash
-docker compose logs -f copilot
+LLM_PROVIDER=openai_compatible
+LLM_BASE_URL=https://your-llm-provider.example.com/v1
+LLM_API_KEY=replace-with-your-key
+LLM_MODEL=replace-with-your-model
 ```
 
-默认不会发送真实飞书消息。只有在启动前显式配置 Webhook 才会发送：
+### 接入 Ollama
 
 ```bash
-export FEISHU_WEBHOOK_URL='你的飞书机器人 Webhook 地址'
-docker compose up --build
+LLM_PROVIDER=ollama
+LLM_BASE_URL=http://127.0.0.1:11434
+LLM_MODEL=qwen3:8b
 ```
+
+真实模型只增强意图识别、订单号提取、RAG 查询改写和客服回复草稿。订单查询、物流查询、异常判断、建单、状态流转、审核边界和飞书通知仍由确定性业务代码控制。
+
+### 飞书协同模式
+
+项目将飞书拆成两条链路：普通物流异常工单继续通过 `FEISHU_WEBHOOK_URL` 发送群通知；退款、退货、补偿、重发、改地址、取消订单等需要人工审核的工单，通过飞书自建应用机器人发送 interactive 审核卡片。群自定义机器人 Webhook 不支持真实按钮回调，因此审核卡片需要配置 `FEISHU_APP_ID`、`FEISHU_APP_SECRET` 和 `FEISHU_CHAT_ID`。
 
 ## 访问入口
 
-服务启动后访问：
-
 | 页面或接口 | 地址 |
 | --- | --- |
-| Swagger API 文档 | `http://127.0.0.1:8001/docs` |
-| 健康检查 | `http://127.0.0.1:8001/health` |
 | React Copilot 工作台 | `http://127.0.0.1:5173/workspace` |
 | React 工单中心 | `http://127.0.0.1:5173/tickets` |
 | React Agent 追踪 | `http://127.0.0.1:5173/runs` |
 | React 运营看板 | `http://127.0.0.1:5173/dashboard` |
-| 客服工单后台 | `http://127.0.0.1:8001/admin/tickets` |
-| Agent Run 后台 | `http://127.0.0.1:8001/admin/runs` |
-| 运营看板 | `http://127.0.0.1:8001/admin/dashboard` |
+| React 操作日志 | `http://127.0.0.1:5173/operation-logs` |
+| Swagger API 文档 | `http://127.0.0.1:8001/docs` |
+| 健康检查 | `http://127.0.0.1:8001/health` |
+| 服务端工单后台 | `http://127.0.0.1:8001/admin/tickets` |
+| 服务端 Run 后台 | `http://127.0.0.1:8001/admin/runs` |
+| 服务端运营看板 | `http://127.0.0.1:8001/admin/dashboard` |
 
-应用首次启动时会写入两条演示数据：
+## 演示数据
 
-- `ORD-1001`：物流异常，用于测试自动创建催物流工单。
-- `ORD-1002`：物流正常，用于测试不创建工单的流程。
-- `ORD-1003` 到 `ORD-1012`：覆盖物流停滞、未发货、签收争议、退款、仅退款、退货、换货、改地址、取消订单和正常催单等本地演示场景。完整问题清单见 [`docs/LOCAL_DEMO.md`](docs/LOCAL_DEMO.md)。
+应用启动时会幂等写入 12 条本地演示订单，覆盖常见售后链路：
 
-## 可选：接入真实 LLM
+| 订单 | 场景 | 预期 |
+| --- | --- | --- |
+| `ORD-1001` | 订单未收到，物流异常 | 创建或复用催物流工单 |
+| `ORD-1002` | 物流正常查询 | 不创建工单，生成查询回复 |
+| `ORD-1003` | 物流停滞 96 小时 | 创建或复用催物流工单 |
+| `ORD-1004` | 已付款未发货 | 召回发货时效规则，不误建物流工单 |
+| `ORD-1005` | 显示签收但用户未收到 | 召回签收争议 SOP |
+| `ORD-1006` | 高金额退款 | 创建待审核工单，优先级 high |
+| `ORD-1007` | 低金额仅退款 | 创建待审核工单，优先级 medium |
+| `ORD-1008` | 退货申请 | 进入人工审核 |
+| `ORD-1009` | 换货申请 | 进入人工审核 |
+| `ORD-1010` | 发货后改地址 | 进入人工审核 |
+| `ORD-1011` | 取消订单 | 进入人工审核 |
+| `ORD-1012` | 物流正常但催单 | 不创建物流工单 |
 
-默认配置为 `LLM_PROVIDER=disabled`，系统不会发出模型请求，并完整保留确定性意图识别、订单号提取、查询改写和回复模板逻辑。
+完整测试问题见 [docs/LOCAL_DEMO.md](docs/LOCAL_DEMO.md)。
 
-在项目根目录创建 `.env`，并参考 [`.env.example`](.env.example) 写入所需变量。后端启动后会自动读取该文件；终端或 PyCharm Run Configuration 中显式设置的同名变量优先级更高。
-
-```bash
-# OpenAI-compatible 服务
-export LLM_PROVIDER=openai_compatible
-export LLM_BASE_URL='https://你的服务地址/v1'
-export LLM_API_KEY='你的密钥'
-export LLM_MODEL='你的模型名'
-```
-
-```bash
-# 本地 Ollama
-export LLM_PROVIDER=ollama
-export LLM_BASE_URL='http://127.0.0.1:11434'
-export LLM_MODEL='qwen3:8b'
-```
-
-Gateway 仅将真实模型用于意图识别、订单号提取、RAG 查询改写和客服回复草稿。订单/物流查询、异常判断、建单、工单状态流转和飞书通知仍由确定性业务代码执行。模型超时、网络失败、无效 JSON 或结构化结果不合格时，系统会自动降级到确定性逻辑；Run Step 会记录 provider、model、Token 用量和降级原因。
-
-## 可选：启用 Redis
-
-M10 的 Redis 接入是可选的。未配置或未启动 Redis 时，后端仍可正常启动，`GET /health` 会返回 `redis.status = disabled` 或 `unavailable`。后续限流、Dashboard 缓存和运营风险榜会在 Redis 可用时自动启用。
-
-本机已启动 Redis 后，在 `.env` 中配置：
+如需清理历史工单和 Run，重置为干净演示库：
 
 ```bash
-REDIS_URL=redis://127.0.0.1:6379/0
-REDIS_CONNECT_TIMEOUT_SECONDS=1
-COPILOT_RATE_LIMIT_CAPACITY=10
-COPILOT_RATE_LIMIT_WINDOW_SECONDS=60
-SESSION_CONTEXT_TTL_SECONDS=1800
-SESSION_CONTEXT_MAX_MESSAGES=10
+/opt/anaconda3/envs/rag_910/bin/python scripts/reset_demo_database.py
 ```
 
-重启后端，再访问 `http://127.0.0.1:8001/health`；成功连接时会返回 `redis.status = connected`。无需在当前阶段修改 Docker Compose。
+该脚本会清空当前 `DATABASE_URL` 指向的本地数据库，并重新写入演示订单和物流数据。
 
-Redis 连通后，`POST /api/copilot/analyze` 默认按 `user_id` 采用令牌桶限制为每 60 秒 10 次；请求没有 `user_id` 时按客户端 IP 兜底。超限时接口返回 HTTP `429`、`Retry-After` 和可重试秒数，React 工作台会直接提示等待时间。Redis 未配置或不可用时，限流自动降级放行，避免影响本地开发。
+## 推荐体验路径
 
-Redis 也会按 `session_id` 保存 Copilot 短期上下文，默认保留 30 分钟、最多 10 条消息。上下文只包含用户/助手文本和最近识别到的订单号；同一 `session_id` 但 `user_id` 不一致时不会读取已有上下文。订单、物流、工单等完整业务对象仍只从数据库按业务权限读取，不进入会话缓存。Redis 不可用时，系统继续使用前端传入的 `history` 和数据库最近 Run 作为订单号识别的降级来源。
+1. 打开 `http://127.0.0.1:5173/workspace`。
+2. 输入物流异常问题：
 
-运营风险榜接口为 `GET /api/dashboard/risk-ranking`。Redis 可用时会使用 Sorted Set 维护三组榜单：异常物流承运商、待处理高优先级工单和高频售后问题；Redis 未配置或写入失败时，接口会从 SQLite 实时聚合并返回 `source = sqlite_fallback`。React 运营看板会展示这三组榜单，便于快速发现承运商异常、积压工单和高频售后类型。
+   ```text
+   我的订单 ORD-1001 怎么还没收到？帮我催一下物流。
+   ```
 
-## 演示流程
+3. 观察工作台中的实时 Agent Step、回复草稿、RAG 规则来源、工单结果和飞书状态。
+4. 打开 `/tickets`，查看新建或复用的工单、审核状态、事件时间线和关联 Run。
+5. 打开 `/runs`，进入 Run 详情，查看 Trace Waterfall 和 Step 输入输出摘要。
+6. 打开 `/dashboard`，查看工单指标、Agent 性能、风险榜和高频售后问题。
+7. 输入退款审核问题：
 
-### 1. 提交异常物流问题
+   ```text
+   订单 ORD-1006 金额比较高，我想退款。
+   ```
 
-```bash
-curl -s -X POST http://127.0.0.1:8001/api/copilot/analyze \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "session_id": "SESSION-DEMO-001",
-    "user_id": "USER-001",
-    "user_message": "我的订单 ORD-1001 怎么还没收到？帮我催一下物流。"
-  }'
-```
+8. 使用 callback 模拟审核：
 
-预期结果：返回 `ticket_created: true`、新生成的 `ticket_id` 和 `run_id`；未配置飞书 Webhook 时，`feishu_status` 为 `disabled`。
+   ```bash
+   curl -s -X POST http://127.0.0.1:8001/api/feishu/callback \
+     -H 'Content-Type: application/json' \
+     -d '{"event_id":"FEISHU-DEMO-APPROVE-001","ticket_id":"替换成待审核工单ID","action":"approve","operator":"主管A"}'
+   ```
 
-### 2. 查看执行链路
+## RAG 设计
 
-将上一步返回的 `run_id` 代入：
-
-```bash
-curl -s http://127.0.0.1:8001/api/runs/{run_id}/steps
-```
-
-可看到以下 Step：
+当前 RAG 链路为：
 
 ```text
-intent -> order_extract -> order_query -> logistics_query -> abnormal_check
--> query_rewrite -> policy_retrieval -> policy_rerank -> reply_generate
--> ticket_create -> feishu_notify
+用户问题
+-> query_rewrite
+-> FAISS 候选召回
+-> deterministic rerank
+-> policy_sources
+-> 回复草稿
 ```
 
-### 3. 在后台人工处理工单
+知识库位于 [memory/policy_knowledge.py](memory/policy_knowledge.py)，当前以「一条 SOP / 一条规则 / 一段话术 = 一个 Document」作为检索单元，覆盖物流异常、正常催单、未发货、签收争议、退款、仅退款、退货、换货、改地址、取消订单、补偿赔付、投诉升级和运费规则。
 
-打开 `http://127.0.0.1:8001/admin/tickets`，进入新建工单详情页。根据当前状态可执行「接单」「解决」「重新打开」操作；后台会写入 `manual_status_changed` 工单事件。
+当前 embedding 由 [services/policy_service.py](services/policy_service.py) 中的 `DeterministicPolicyEmbedding` 提供：它实现 LangChain `Embeddings` 接口，通过售后关键词计数生成可重复向量，再交给 FAISS 建索引。这样可以在没有外部模型和网络依赖的情况下保证自动化测试稳定。后续知识库规模上来后，可以替换为真实 embedding 模型、Milvus / pgvector / Qdrant，以及独立 reranker。
 
-### 4. 模拟飞书回调
+## Agent 可观测性
 
-使用步骤 1 返回的真实 `ticket_id`：
-
-```bash
-curl -s -X POST http://127.0.0.1:8001/api/feishu/callback \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "event_id": "FEISHU-EVENT-DEMO-001",
-    "ticket_id": "TCK-替换为真实工单ID",
-    "action": "claim",
-    "operator": "客服A"
-  }'
-```
-
-支持的状态转换：
-
-| 动作 | 状态变化 |
-| --- | --- |
-| `claim` | `todo -> processing` |
-| `resolve` | `processing -> resolved` |
-| `reopen` | `resolved -> processing` |
-
-成功回调会更新工单，并分别写入 `ticket_events` 与 `feishu_events`，用于区分业务审计与外部回调审计。
-
-## RAG 说明
-
-本项目的 RAG 链路为：
+每次 Copilot 分析都会生成一条 `agent_runs` 和多条 `agent_steps`：
 
 ```text
-用户问题 -> query_rewrite -> FAISS 召回 -> deterministic 词法重排序 -> 回复草稿
+intent_recognition
+-> order_extract
+-> order_query
+-> session_binding_check
+-> follow_up_check
+-> logistics_query
+-> abnormal_check
+-> query_rewrite
+-> policy_retrieval
+-> policy_rerank
+-> reply_generate
+-> approval_check
+-> ticket_create
+-> feishu_notify
 ```
 
-知识库位于 [`memory/policy_knowledge.py`](memory/policy_knowledge.py)，当前覆盖物流异常、正常物流、签收争议、发货时效、退款、仅退款、退货、换货、改地址、取消订单、补偿赔付、投诉升级、运费和客服安抚话术。当前实现不依赖真实 LLM 或付费 embedding 服务，方便本地演示和自动化测试；数据量与召回要求提升后，可将向量存储替换为 Milvus、pgvector 或 Qdrant，并接入真实 embedding 与 reranker。
+Run 详情页会展示：
 
-可通过退款问题验证 RAG 不误建物流工单：
+- Step 状态、类型和耗时
+- 输入摘要、输出摘要和错误信息
+- LLM provider、model、token 和 fallback reason
+- RAG 缓存命中状态
+- Trace Waterfall 连续比例条
 
-```bash
-curl -s -X POST http://127.0.0.1:8001/api/copilot/analyze \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "session_id": "SESSION-RAG-REFUND-001",
-    "user_id": "USER-001",
-    "user_message": "订单 ORD-1001 可以退款吗？"
-  }'
+## 操作日志与审计
+
+`ticket_events` 记录单张工单的状态时间线，`feishu_events` 记录飞书回调，`agent_steps` 记录单次 Agent 执行步骤。`operation_logs` 则提供跨对象的统一操作流水，用于检索 Copilot 分析、自动建单/复用、人工操作和飞书审核。
+
+前端可在 `/operation-logs` 按操作人、动作、工单 ID、Run ID、订单 ID 和状态筛选。数据库用于页面查询；本地同时写入按日期拆分的 JSONL 文件：
+
+```text
+logs/operation-YYYY-MM-DD.jsonl
 ```
 
-预期结果：返回退款规则的 `policy_sources` 与回复草稿，但 `ticket_created` 为 `false`。
+文件日志只保留结构化业务摘要和关联 ID，不写入 API Key、App Secret、Webhook URL 或完整飞书回调内容。
 
 ## 主要 API
 
@@ -245,37 +309,48 @@ curl -s -X POST http://127.0.0.1:8001/api/copilot/analyze \
 | `GET` | `/health` | 服务健康检查 |
 | `GET` | `/api/orders/{order_id}` | 查询订单 |
 | `GET` | `/api/logistics/{order_id}` | 查询物流 |
-| `POST` | `/api/tickets` | 手工创建工单 |
+| `POST` | `/api/tickets` | 创建工单 |
 | `GET` | `/api/tickets` | 查询工单列表 |
-| `GET` | `/api/tickets/{ticket_id}` | 查询工单与事件 |
-| `PATCH` | `/api/tickets/{ticket_id}` | 更新工单字段 |
-| `POST` | `/api/copilot/analyze` | 执行 Copilot 分析闭环 |
-| `GET` | `/api/runs/{run_id}` | 查询 Agent Run |
-| `GET` | `/api/runs/{run_id}/steps` | 查询 Agent Step 链路 |
+| `GET` | `/api/tickets/{ticket_id}` | 查询工单详情 |
+| `POST` | `/api/tickets/{ticket_id}/actions` | 工单人工状态操作 |
+| `POST` | `/api/copilot/analyze` | 同步执行 Copilot 分析 |
+| `POST` | `/api/copilot/analyze/start` | 异步启动 Copilot 分析 |
+| `GET` | `/api/runs` | 查询 Run 列表 |
+| `GET` | `/api/runs/{run_id}` | 查询 Run 详情 |
+| `GET` | `/api/runs/{run_id}/steps` | 查询 Step 链路 |
+| `GET` | `/api/runs/{run_id}/events` | SSE 实时事件流 |
+| `GET` | `/api/operation-logs` | 查询全局操作日志，可按关联 ID 等字段筛选 |
 | `POST` | `/api/feishu/callback` | 模拟飞书卡片回调 |
 | `GET` | `/api/dashboard/overview` | 查询运营概览 |
+| `GET` | `/api/dashboard/ticket-stats` | 查询工单统计 |
+| `GET` | `/api/dashboard/agent-performance` | 查询 Agent 性能 |
+| `GET` | `/api/dashboard/risk-ranking` | 查询运营风险榜 |
 
-完整参数与响应结构请查看 Swagger：`http://127.0.0.1:8001/docs`。
+完整参数和响应结构见 Swagger：`http://127.0.0.1:8001/docs`。
 
-## 测试
+## 测试与验证
 
-自动化测试使用独立的 `data/test.db`，不会污染本地服务使用的 `data/app.db`。
+后端测试：
 
 ```bash
 /opt/anaconda3/envs/rag_910/bin/python -m pytest -q
 ```
 
-测试覆盖健康检查、订单/物流/工单 API、Copilot LangGraph 工作流、RAG 检索与重排序、飞书通知与回调、后台人工状态流转、Dashboard API 等关键路径。
-
-## 重置本地演示数据
-
-如果 `data/app.db` 中历史测试工单和 Agent Run 太多，演示前可以重置为干净的 12 条本地订单用例：
+前端测试：
 
 ```bash
-/opt/anaconda3/envs/rag_910/bin/python scripts/reset_demo_database.py
+cd frontend
+npm run test:run
+npm run build
 ```
 
-该命令会清空当前 `DATABASE_URL` 指向的数据库并重新写入演示订单、物流数据；执行前请确认没有需要保留的本地调试数据。
+Docker Compose 配置检查：
+
+```bash
+docker compose config --quiet
+```
+
+测试覆盖健康检查、订单与物流 API、工单状态机、Copilot LangGraph 工作流、RAG 检索与重排序、飞书通知与回调、SSE 实时事件、操作日志数据库/JSONL 与筛选 API、Dashboard API、React 页面渲染和 Trace Waterfall 交互。
 
 ## 项目文档
 
@@ -283,12 +358,26 @@ curl -s -X POST http://127.0.0.1:8001/api/copilot/analyze \
 - [产品与技术规划](ecommerce_after_sales_copilot_plan.md)
 - [当前实施状态](docs/STATUS.md)
 - [本地演示用例](docs/LOCAL_DEMO.md)
-- [M15 演示脚本](docs/DEMO_SCRIPT.md)
+- [项目展示脚本](docs/DEMO_SCRIPT.md)
+- [项目展示材料](docs/PROJECT_SHOWCASE.md)
 
-## 当前边界与后续演进
+## 当前边界
 
-- 当前使用 SQLite 和本地演示数据，未连接真实电商平台。
-- 默认不调用真实飞书、LLM 或付费 embedding API；真实 LLM 仅在手动配置 Gateway 后启用。
-- 当前本地阶段使用 `POST /api/feishu/callback` 模拟飞书审核；真实飞书公网回调放到 Cloudflare Tunnel / 服务器部署之后联调。
-- M11 RabbitMQ 可靠投递后置到真实飞书回调跑通之后，用于通知重试、长耗时任务重试和失败告警。
-- 随着知识库规模增长，可将 FAISS 替换为 Milvus、pgvector 或 Qdrant，并接入真实 embedding 与 reranker。
+- 当前订单、物流和售后规则均为本地演示数据，未接入真实电商平台。
+- 默认不调用真实 LLM、真实飞书或付费 embedding API。
+- 飞书真实卡片按钮点击依赖公网 HTTPS callback，并需要通过自建应用机器人发送审核卡片；Webhook 只承担普通通知。
+- 当前 RAG 使用人工整理的短规则 Document，尚未实现长文档解析、chunk overlap、父子 chunk 和增量入库。
+- SQLite 适合本地演示和单机开发，生产化可迁移至 PostgreSQL。
+- RabbitMQ 可靠投递后置到真实飞书回调跑通之后，用于通知失败重试、长耗时任务重试和失败告警。
+
+## 后续演进
+
+```text
+本地全链路验收
+-> Docker Compose 与展示材料收口
+-> Cloudflare Tunnel / 域名公网访问
+-> 真实飞书卡片回调联调
+-> RabbitMQ 可靠投递
+-> 真实电商平台 / 多租户 / 权限体系
+-> 真实 embedding、向量数据库和 reranker
+```

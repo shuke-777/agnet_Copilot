@@ -167,6 +167,27 @@ export type RiskRanking = {
   frequent_issue_risks: RiskRankingItem[];
 };
 
+export type OperationLog = {
+  log_id: string;
+  operator: string;
+  operator_type: string;
+  action: string;
+  target_type: string;
+  target_id: string;
+  ticket_id: string | null;
+  run_id: string | null;
+  order_id: string | null;
+  source: string;
+  status: string;
+  summary: string;
+  before_data: string | null;
+  after_data: string | null;
+  extra_data: string | null;
+  created_at: string;
+};
+
+export type OperationLogFilters = Partial<Pick<OperationLog, "operator" | "action" | "target_type" | "ticket_id" | "run_id" | "order_id" | "status">>;
+
 type AnalyzeCopilotInput = {
   session_id: string;
   user_id: string;
@@ -256,5 +277,10 @@ export async function getAgentPerformance(): Promise<AgentPerformance> {
 
 export async function getDashboardRiskRanking(): Promise<RiskRanking> {
   const response = await axios.get<RiskRanking>("/api/dashboard/risk-ranking");
+  return response.data;
+}
+
+export async function listOperationLogs(filters?: OperationLogFilters): Promise<OperationLog[]> {
+  const response = await axios.get<OperationLog[]>("/api/operation-logs", { params: filters });
   return response.data;
 }
