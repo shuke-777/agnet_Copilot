@@ -168,7 +168,7 @@ rejected
 manual_confirm
 ```
 
-本地阶段通过 `POST /api/feishu/callback` 模拟飞书卡片按钮；公网 HTTPS callback 和真实飞书事件 payload 适配放到部署阶段完成。
+本地仍可通过 `POST /api/feishu/callback` 模拟审核动作；当前已完成公网 HTTPS callback 与真实 `card.action.trigger` payload 的适配和联调。审核卡片操作后，系统会回写工单、事件与飞书处理结果，并以已处理卡片替换原操作卡片。
 
 ## Agent Trace 与可观测性
 
@@ -212,7 +212,7 @@ Redis 不可用时，系统自动降级到 SQLite 实时查询或直接放行。
 5. 打开工单中心，查看工单详情、审核状态和事件时间线。
 6. 打开 Agent 追踪，查看 Trace Waterfall。
 7. 打开运营看板，查看工单指标、Agent 性能和风险榜。
-8. 使用本地 callback 模拟审核通过或拒绝。
+8. 对退款审核卡片执行通过、拒绝或转人工确认，查看工单状态与审计记录回写。
 
 ## 项目亮点总结
 
@@ -227,12 +227,10 @@ Redis 不可用时，系统自动降级到 SQLite 实时查询或直接放行。
 
 ## 当前边界与演进
 
-当前阶段已经完成本地业务闭环和展示材料收口。后续演进顺序：
+当前阶段已完成本地业务闭环、Cloudflare Tunnel 公网访问、飞书真实审核卡片回调和展示材料收口。后续演进顺序：
 
 ```text
-Cloudflare Tunnel / 域名公网访问
--> 真实飞书卡片回调联调
--> RabbitMQ 可靠投递
+RabbitMQ 可靠投递
 -> 真实电商平台接口
 -> PostgreSQL / 多租户 / 权限体系
 -> 真实 embedding、向量数据库和 reranker

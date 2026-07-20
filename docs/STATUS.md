@@ -3,8 +3,8 @@
 ## 项目状态
 
 - 项目定位：电商售后客服 Copilot
-- 当前阶段：M16 操作日志 / 审计日志中心已完成
-- 当前里程碑：M16 已完成；M11 RabbitMQ 后置，下一步进行真实飞书公网回调联调
+- 当前阶段：M16 操作日志 / 审计日志中心与公网联调已完成
+- 当前里程碑：M16、Cloudflare Tunnel 公网访问与飞书真实审核卡片回调已完成；M11 RabbitMQ 继续后置
 
 ## 已完成
 
@@ -216,7 +216,7 @@
   - README 已重写为项目级说明文档，覆盖项目定位、核心价值、系统能力、架构、启动、环境变量、演示路径、RAG、Agent 可观测性、API、测试、边界和演进路线。
   - 新增 `docs/PROJECT_SHOWCASE.md`，集中说明业务价值、核心闭环、LangGraph 编排、RAG 设计、人工审核、Trace Waterfall、Redis 增强和展示路径。
   - `docker-compose.yml` 已补充 LLM、Redis、RAG 缓存和会话相关环境变量透传，并为前后端服务增加 healthcheck。
-- M13 真实飞书公网回调联调进行中：
+- M13 真实飞书公网回调联调已完成：
   - 飞书 URL verification 已支持 `challenge` 回包，可用于自建应用回调地址校验。
   - `POST /api/feishu/callback` 已兼容飞书真实 `card.action.trigger` 事件结构，可从 `header.event_id`、`event.operator` 和 `event.action.value` 中归一化出内部的 `event_id`、`ticket_id`、`action`、`operator`。
   - 旧的 Postman / curl 本地模拟格式继续保留；真实飞书按钮点击和本地模拟都会复用同一套工单审核、状态流转、事件记录和幂等逻辑。
@@ -240,11 +240,11 @@
 
 ## 下一步
 
-- 当前优先级：真实飞书自建应用卡片按钮点击与状态回写实测 -> README/展示材料按实际公网方式微调 -> M11 RabbitMQ 可靠投递。
+- 当前优先级：README / 展示材料收口 -> M11 RabbitMQ 可靠投递。
 - 本地阶段仍可使用 `POST /api/feishu/callback` 通过 Postman / curl 模拟 `approve`、`reject`、`manual_confirm` 审核动作。
-- 真实飞书公网联调：自建应用需配置公网 HTTPS callback，并订阅 `card.action.trigger`；当前代码已完成真实 payload 适配、自建应用机器人发卡片和真实按钮回调后的卡片状态回写，下一步用飞书群卡片按钮实测。
-- M11：RabbitMQ 异步任务与可靠投递明确后移到真实飞书回调跑通之后，再处理飞书通知重试、长耗时 LLM 重试和失败工单告警。
-- 最终交付材料已完成第一版；后续如果部署方式变化，再同步更新 README 和展示材料。
+- 真实飞书公网联调已完成：自建应用已配置公网 HTTPS callback 并订阅 `card.action.trigger`；真实 payload、审核机器人发卡片、按钮回调与已处理卡片状态回写均已验证。
+- M11：RabbitMQ 异步任务与可靠投递仍后置，用于飞书通知重试、长耗时 LLM 重试和失败工单告警。
+- README / 展示材料已按当前公网部署与真实飞书状态收口；界面截图可在后续补充至 `docs/images/`。
 
 ## M8 约定
 
