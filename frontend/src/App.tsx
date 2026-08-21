@@ -8,6 +8,8 @@ import {
   SendOutlined,
   RobotOutlined,
   AuditOutlined,
+  TeamOutlined,
+  UnorderedListOutlined,
 } from "@ant-design/icons";
 import {
   Alert,
@@ -43,9 +45,11 @@ import {
   getLogistics,
   getOrder,
   getTicket,
+  getCustomer360,
   listAgentRuns,
   listAgentSteps,
   listTickets,
+  listTodos,
   listOperationLogs,
 } from "./services/api";
 import { CopilotAnalysisProvider, useCopilotAnalysis } from "./CopilotAnalysisContext";
@@ -64,6 +68,7 @@ import type {
   TicketStats,
   OperationLog,
   OperationLogFilters,
+  Customer360,
 } from "./services/api";
 
 const { Header, Content, Sider } = Layout;
@@ -73,6 +78,8 @@ type NavigationItem = Required<MenuProps>["items"][number];
 
 const navigationItems: NavigationItem[] = [
   { key: "/workspace", icon: <InboxOutlined />, label: <NavLink to="/workspace">Copilot 工作台</NavLink> },
+  { key: "/todos", icon: <UnorderedListOutlined />, label: <NavLink to="/todos">待办中心</NavLink> },
+  { key: "/customers", icon: <TeamOutlined />, label: <NavLink to="/customers">客户360</NavLink> },
   { key: "/tickets", icon: <FileSearchOutlined />, label: <NavLink to="/tickets">工单中心</NavLink> },
   { key: "/runs", icon: <RobotOutlined />, label: <NavLink to="/runs">Agent 追踪</NavLink> },
   { key: "/dashboard", icon: <BarChartOutlined />, label: <NavLink to="/dashboard">运营看板</NavLink> },
@@ -487,6 +494,91 @@ function TicketsPage() {
           locale={{ emptyText: "暂无工单，请先在 Copilot 工作台提交一条异常物流咨询。" }}
         />
       </article>
+    </section>
+  );
+}
+
+function TodoCenterPage() {
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [priority, setPriority] = useState<string>();
+  const [overdue, setOverdue] = useState<boolean>();
+  const [isLoading, setIsLoading] = useState(true);
+  const { refreshToken } = useCopilotAnalysis();
+
+  useEffect(() => {
+    let active = true;
+    setIsLoading(true);
+    listTodos({ priority, overdue }).then((data) => active && setTickets(data)).finally(() => active && setIsLoading(false));
+    return () => { active = false; };
+  }, [priority, overdue, refreshToken]);
+
+  return (
+    <section>
+      <PageHeader title="待办中心" description="优先处理未认领、即将超时和已超时的售后工单。" />
+      <article className="data-panel">
+        <Space wrap className="table-toolbar">
+          <Select aria-label="筛选优先级" allowClear placeholder="全部优先级" style={{ width: 150 }} value={priority} onChange={setPriority} options={[{ value: "high", label: "高优先级" }, { value: "normal", label: "普通" }]} />
+          <Select aria-label="筛选超时" allowClear placeholder="全部 SLA 状态" style={{ width: 150 }} value={overdue} onChange={setOverdue} options={[{ value: true, label: "已超时" }, { value: false, label: "未超时" }]} />
+        </Space>
+        <Table<Ticket>
+          loading={isLoading}
+          rowKey="ticket_id"
+          dataSource={tickets}
+          pagination={{ pageSize: 8, hideOnSinglePage: true }}
+          columns={[
+            { title: "工单", dataIndex: "ticket_id", render: (value: string) => <Link to={`/tickets/${value}`}>{value}</Link> },
+            { title: "订单号", dataIndex: "order_id" },
+            { title: "优先级", dataIndex: "priority", render: (value: string) => <StatusTag value={value} /> },
+            { title: "状态", dataIndex: "status", render: (value: string) => <StatusTag value={value} /> },
+            { title: "SLA", render: (_: unknown, ticket: Ticket) => ticket.sla_overdue ? <Tag color="red">已超时</Tag> : <Tag color="green">剩余 {Math.ceil((ticket.sla_remaining_seconds ?? 0) / 60)} 分钟</Tag> },
+            { title: "处理人", dataIndex: "assigned_to", render: (value: string | null) => value || "未认领" },
+          ]}
+          locale={{ emptyText: "暂无待办工单" }}
+        />
+      </article>
+    </section>
+  );
+}
+
+function Customer360Page() {
+  const [userId, setUserId] = useState("USER-001");
+  const [orderId, setOrderId] = useState("");
+  const [customer, setCustomer] = useState<Customer360 | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const loadCustomer = () => {
+    if (!userId.trim()) return;
+    setIsLoading(true);
+    setErrorMessage(null);
+    getCustomer360(userId.trim(), orderId.trim() || undefined).then(setCustomer).catch(() => setErrorMessage("客户信息暂时无法加载，请确认 user_id。" )).finally(() => setIsLoading(false));
+  };
+
+  useEffect(() => { loadCustomer(); }, []);
+
+  return (
+    <section>
+      <PageHeader title="客户360" description="把客户、订单、物流、工单和 Agent 处理记录放在同一个上下文里。" />
+      <article className="data-panel">
+        <Space.Compact style={{ width: "100%" }}>
+          <Input aria-label="客户 user_id" value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="输入 user_id，例如 USER-001" />
+          <Input aria-label="订单号筛选" value={orderId} onChange={(event) => setOrderId(event.target.value)} placeholder="可选订单号，例如 ORD-1001" />
+          <Button type="primary" onClick={loadCustomer}>查询客户</Button>
+        </Space.Compact>
+      </article>
+      {errorMessage && <Alert className="analysis-alert" message={errorMessage} showIcon type="error" />}
+      {isLoading && <div className="analysis-loading" role="status"><Spin /><Text>正在加载客户360...</Text></div>}
+      {customer && !isLoading && (
+        <>
+          <div className="workspace-grid">
+            <article className="data-panel"><Text className="panel-eyebrow">客户</Text><Title level={4}>{customer.user_id}</Title><Text type="secondary">订单 {customer.orders.length} · 工单 {customer.tickets.length} · 操作记录 {customer.operation_logs.length}</Text></article>
+            <article className="data-panel"><Text className="panel-eyebrow">风险提示</Text><Title level={4}>{customer.tickets.filter((ticket) => ticket.sla_overdue).length ? "存在 SLA 超时工单" : "当前无 SLA 超时"}</Title><Text type="secondary">优先关注待办中心中的高优先级事项。</Text></article>
+          </div>
+          <article className="data-panel"><Text className="panel-eyebrow">最近订单与物流</Text><Table rowKey="order_id" pagination={false} dataSource={customer.orders} columns={[{ title: "订单号", dataIndex: "order_id" }, { title: "商品", dataIndex: "product_name" }, { title: "状态", dataIndex: "status" }, { title: "金额", dataIndex: "amount", render: (value: number) => `¥${value}` }]} /></article>
+          <article className="data-panel"><Text className="panel-eyebrow">关联工单</Text><Table<Ticket> rowKey="ticket_id" pagination={false} dataSource={customer.tickets} columns={[{ title: "工单", dataIndex: "ticket_id", render: (value: string) => <Link to={`/tickets/${value}`}>{value}</Link> }, { title: "订单号", dataIndex: "order_id" }, { title: "状态", dataIndex: "status", render: (value: string) => <StatusTag value={value} /> }, { title: "SLA", render: (_: unknown, ticket: Ticket) => ticket.sla_overdue ? <Tag color="red">已超时</Tag> : "正常" }]} /></article>
+          <article className="data-panel"><Text className="panel-eyebrow">处理时间线</Text><Timeline items={customer.timeline.map((item) => ({ key: `${item.kind}-${item.target_id}`, label: new Date(item.timestamp).toLocaleString("zh-CN"), children: <><Text strong>{item.title}</Text><br /><Text type="secondary">{item.detail}</Text></> }))} /></article>
+        </>
+      )}
     </section>
   );
 }
@@ -1019,6 +1111,8 @@ function AppShell() {
           <Routes>
             <Route path="/" element={<Navigate to="/workspace" replace />} />
             <Route path="/workspace" element={<WorkspacePage />} />
+            <Route path="/todos" element={<TodoCenterPage />} />
+            <Route path="/customers" element={<Customer360Page />} />
             <Route path="/tickets" element={<TicketsPage />} />
             <Route path="/tickets/:ticketId" element={<TicketDetailPage />} />
             <Route path="/runs" element={<RunsPage />} />

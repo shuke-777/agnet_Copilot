@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, foreign, mapped_column, relationship
@@ -97,6 +97,20 @@ class Ticket(Base):
     @property
     def source_run_created_at(self) -> datetime | None:
         return self.source_run.created_at if self.source_run is not None else None
+
+    @property
+    def sla_deadline_at(self) -> datetime:
+        return self.created_at + timedelta(minutes=30 if self.priority == "high" else 120)
+
+    @property
+    def sla_remaining_seconds(self) -> int | None:
+        if self.status in {"resolved", "closed"}:
+            return None
+        return max(0, int((self.sla_deadline_at - utc_now()).total_seconds()))
+
+    @property
+    def sla_overdue(self) -> bool:
+        return self.status not in {"resolved", "closed"} and utc_now() >= self.sla_deadline_at
 
 
 class TicketEvent(Base):

@@ -63,6 +63,9 @@ export type Ticket = {
   approval_decided_at: string | null;
   created_at: string;
   updated_at: string;
+  sla_deadline_at: string;
+  sla_remaining_seconds: number | null;
+  sla_overdue: boolean;
   events: TicketEvent[];
   related_runs: Array<{
     run_id: string;
@@ -70,6 +73,25 @@ export type Ticket = {
     user_message: string;
     status: string;
     created_at: string;
+  }>;
+};
+
+export type Customer360 = {
+  user_id: string;
+  orders: Array<Order & { user_id: string; amount: number; created_at: string }>;
+  logistics: Array<Logistics & { logistics_id: string; order_id: string; last_event_time: string }>;
+  tickets: Ticket[];
+  related_runs: AgentRun[];
+  operation_logs: Array<Pick<OperationLog, "log_id" | "action" | "summary" | "ticket_id" | "order_id" | "created_at">>;
+  timeline: Array<{
+    timestamp: string;
+    kind: "order" | "ticket" | "ticket_event" | "agent_run" | "operation_log";
+    title: string;
+    detail: string;
+    target_id: string;
+    order_id: string | null;
+    ticket_id: string | null;
+    status: string | null;
   }>;
 };
 
@@ -213,6 +235,18 @@ export async function startCopilotAnalysis(input: AnalyzeCopilotInput): Promise<
 
 export async function listTickets(query?: string): Promise<Ticket[]> {
   const response = await axios.get<Ticket[]>("/api/tickets", { params: query ? { q: query } : undefined });
+  return response.data;
+}
+
+export async function listTodos(filters?: { status?: string; priority?: string; assigned_to?: string; overdue?: boolean }): Promise<Ticket[]> {
+  const response = await axios.get<Ticket[]>("/api/todos", { params: filters });
+  return response.data;
+}
+
+export async function getCustomer360(userId: string, orderId?: string): Promise<Customer360> {
+  const response = await axios.get<Customer360>(`/api/customers/${encodeURIComponent(userId)}/360`, {
+    params: orderId ? { order_id: orderId } : undefined,
+  });
   return response.data;
 }
 

@@ -62,6 +62,33 @@ describe("App", () => {
     });
   });
 
+  it("filters customer 360 by order and renders its handling timeline", async () => {
+    const user = userEvent.setup();
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        user_id: "USER-001",
+        orders: [{ order_id: "ORD-1001", product_name: "演示商品", status: "shipped", amount: 99, created_at: "2026-08-21T10:00:00" }],
+        logistics: [],
+        tickets: [],
+        related_runs: [],
+        operation_logs: [],
+        timeline: [{ timestamp: "2026-08-21T10:00:00", kind: "order", title: "订单 ORD-1001 创建", detail: "演示商品", target_id: "ORD-1001", order_id: "ORD-1001", ticket_id: null, status: "shipped" }],
+      },
+    });
+
+    render(<MemoryRouter initialEntries={["/customers"]}><App /></MemoryRouter>);
+
+    expect(await screen.findByRole("heading", { name: "客户360" })).toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: "订单号筛选" }), "ORD-1001");
+    await user.click(screen.getByRole("button", { name: "查询客户" }));
+
+    await waitFor(() => {
+      expect(mockedAxios.get).toHaveBeenLastCalledWith("/api/customers/USER-001/360", { params: { order_id: "ORD-1001" } });
+    });
+    expect(await screen.findByText("处理时间线")).toBeInTheDocument();
+    expect(screen.getByText("订单 ORD-1001 创建")).toBeInTheDocument();
+  });
+
   it("submits an after-sales question and renders the Copilot analysis result", async () => {
     const user = userEvent.setup();
     mockedAxios.post.mockResolvedValue({

@@ -95,6 +95,17 @@ class TicketRelatedRunRead(BaseModel):
     created_at: datetime
 
 
+class Customer360TimelineItem(BaseModel):
+    timestamp: datetime
+    kind: Literal["order", "ticket", "ticket_event", "agent_run", "operation_log"]
+    title: str
+    detail: str
+    target_id: str
+    order_id: str | None = None
+    ticket_id: str | None = None
+    status: str | None = None
+
+
 class TicketRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -117,8 +128,21 @@ class TicketRead(BaseModel):
     approval_decided_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    sla_deadline_at: datetime
+    sla_remaining_seconds: int | None
+    sla_overdue: bool
     events: list[TicketEventRead] = []
     related_runs: list[TicketRelatedRunRead] = []
+
+
+class Customer360Read(BaseModel):
+    user_id: str
+    orders: list[OrderRead]
+    logistics: list[LogisticsRead]
+    tickets: list[TicketRead]
+    related_runs: list[TicketRelatedRunRead]
+    operation_logs: list[dict]
+    timeline: list[Customer360TimelineItem]
 
 
 class FeishuCallbackRequest(BaseModel):
